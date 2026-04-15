@@ -23,7 +23,7 @@ from fastapi import FastAPI
 from sqlalchemy import text
 
 from app.database import AsyncSessionLocal, Base, engine
-from app.routers import codes, sync
+from app.routers import sync
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,17 +32,16 @@ logger = logging.getLogger(__name__)
 # FastAPI app
 # ---------------------------------------------------------------------------
 app = FastAPI(
-    title="ICD-10-CM Sync API",
+    title="CMS Medical Codes API",
     description=(
-        "Fetches ICD-10-CM codes from CMS, syncs them to PostgreSQL, "
-        "and exposes a query API."
+        "Syncs ICD-10-CM diagnosis codes and HCPCS procedure codes from CMS "
+        "to PostgreSQL, and exposes a unified query API for both code sets."
     ),
-    version="1.0.0",
+    version="2.0.0",
 )
 
 # Register routers
 app.include_router(sync.router)
-app.include_router(codes.router)
 
 # ---------------------------------------------------------------------------
 # Scheduler (auto-sync every year on Oct 1)

@@ -1,118 +1,128 @@
 """
 models.py
 ---------
-Two tables:
-  icd_codes     — holds the LATEST version of all ICD-10-CM codes only.
-                  Old/retired codes are deleted on each sync.
-                  Only one version lives here at any time.
+SQLAlchemy ORM models — one class per DB table.
 
-  sync_history  — one row per sync run (audit log of what changed).
+Tables:
+  icd_codes         — current ICD-10-CM diagnosis codes (annual CMS release)
+  icd_sync_history  — audit log of every ICD sync run
+  hcpcs_codes       — current HCPCS procedure codes (quarterly CMS release)
+  hcpcs_sync_log    — audit log of every HCPCS sync run
 """
 
 from sqlalchemy import (
-    Boolean, Column, Date, DateTime,
-    Integer, String, Text, func,
+    BigInteger, Boolean, Column, Date, DateTime,
+    Integer, Numeric, String, Text, func,
 )
 from app.database import Base
 
 
+# ---------------------------------------------------------------------------
+# ICD-10-CM
+# ---------------------------------------------------------------------------
+
 class IcdCode(Base):
+    """ICD-10-CM diagnosis codes with versioning. Multiple rows per code allowed (only 1 active)."""
+
     __tablename__ = "icd_codes"
 
-    # ------------------------------------------------------------------
-    # Primary key
-    # ------------------------------------------------------------------
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id             = Column(Integer,  primary_key=True, autoincrement=True)
+    code           = Column(String(10),  nullable=False, index=True)  # NOT unique — allows versions
+    description    = Column(Text,        nullable=False)
+    category       = Column(String(3),   nullable=False, index=True)
+    chapter        = Column(String(80),  nullable=True)
+    is_billable    = Column(Boolean,     nullable=False, default=False, index=True)
+    version        = Column(String(10),  nullable=False)
+    effective_date = Column(Date,        nullable=True)
 
-    # ------------------------------------------------------------------
-    # Core code fields — sourced from the CMS order file
-    # ------------------------------------------------------------------
+    is_active      = Column(Boolean,     nullable=False, default=True, index=True)
+    term_dt        = Column(Date,        nullable=True)
+    data_hash      = Column(String(32),  nullable=True)
+    created_at     = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at     = Column(DateTime(timezone=True), server_default=func.now(),
+                            onupdate=func.now(), nullable=False)
 
-    # Raw code, no dot — what goes on insurance claims
-    # e.g. "A001", "Z8249"
-    code = Column(String(10), unique=True, nullable=False, index=True)
-
-    # Same code with a dot added after the 3rd character — for display
-    # e.g. "A00.1", "Z82.49"
-    # Derived once during sync so reads never recalculate it
-    code_with_dot = Column(String(12), nullable=False)
-
-    # Short description from the CMS file
-    # e.g. "Cholera due to Vibrio cholerae 01, biovar eltor"
-    description = Column(Text, nullable=False)
-
-    # ------------------------------------------------------------------
-    # Classification fields — all derived during sync
-    # ------------------------------------------------------------------
-
-    # First 3 characters — the "category"
-    # e.g. "A001" → category = "A00"
-    # Lets you group or filter all codes within a category
-    category = Column(String(3), nullable=False, index=True)
-
-    # One of the 21 ICD-10-CM chapter names, derived from code range
-    # e.g. codes A00–B99 → "Certain infectious and parasitic diseases"
-    chapter = Column(String(80), nullable=True)
-
-    # True  = valid for HIPAA claim submission
-    # False = header/grouping code, cannot go on a claim by itself
-    # Source: column 15 of the CMS order file (1 = billable, 0 = not)
-    is_billable = Column(Boolean, nullable=False, default=False, index=True)
-
-    # ------------------------------------------------------------------
-    # Version metadata — tells us WHICH CMS release is currently loaded.
-    # Only one version lives in this table at a time.
-    # e.g. "2025" means the FY2025 (Oct 1 2024) release is loaded.
-    # ------------------------------------------------------------------
-    version = Column(String(10), nullable=False)
-
-    # The date this CMS version became effective — always Oct 1
-    # e.g. 2024-10-01 for the FY2025 release
-    effective_date = Column(Date, nullable=True)
-
-    # ------------------------------------------------------------------
-    # Audit timestamps
-    # ------------------------------------------------------------------
-    created_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
-    updated_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
-    )
-
-    def __repr__(self):
-        return f"<IcdCode {self.code_with_dot} | {self.description[:40]}>"
+    def __repr__(self) -> str:
+        status = "active" if self.is_active else "inactive"
+        return f"<IcdCode {self.code_with_dot} | {status} | {self.description[:40]}>"
 
 
 class SyncHistory(Base):
-    """
-    One row per sync run — an immutable audit log.
-    Tells you: when did we sync, what version did we pull,
-    how many codes changed, and did it succeed?
-    """
-    __tablename__ = "sync_history"
+    """Immutable audit log — one row per ICD sync run."""
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    __tablename__ = "icd_sync_history"
 
-    synced_at  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
-    source_url = Column(Text, nullable=False)       # CMS URL we downloaded
-    version    = Column(String(10), nullable=True)  # e.g. "2025"
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    synced_at     = Column(DateTime(timezone=True), server_default=func.now(),
+                           nullable=False, index=True)
+    source_url    = Column(Text,        nullable=False)
+    version       = Column(String(10),  nullable=True)
+    codes_added   = Column(Integer,     default=0, nullable=False)
+    codes_updated = Column(Integer,     default=0, nullable=False)
+    codes_deleted = Column(Integer,     default=0, nullable=False)
+    codes_skipped = Column(Integer,     default=0, nullable=False)
+    status        = Column(String(20),  nullable=False)
+    error_message = Column(Text,        nullable=True)
 
-    # What changed during this run
-    codes_added   = Column(Integer, default=0, nullable=False)
-    codes_updated = Column(Integer, default=0, nullable=False)
-    codes_deleted = Column(Integer, default=0, nullable=False)
-
-    status        = Column(String(20), nullable=False)   # "success" | "failed"
-    error_message = Column(Text, nullable=True)          # set only on failure
-
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
-            f"<SyncHistory {self.version} | {self.status} | "
+            f"<SyncHistory FY{self.version} | {self.status} | "
             f"+{self.codes_added} ~{self.codes_updated} -{self.codes_deleted}>"
+        )
+
+
+# ---------------------------------------------------------------------------
+# HCPCS Level II
+# ---------------------------------------------------------------------------
+
+class HcpcsCode(Base):
+    """HCPCS Level II procedure codes with versioning. Multiple rows per code allowed (only 1 active)."""
+
+    __tablename__ = "hcpcs_codes"
+
+    id                = Column(Integer,  primary_key=True, autoincrement=True)
+    hcpc              = Column(String(10),   nullable=False, index=True)  # NOT unique — allows versions
+
+    seqnum            = Column(Integer,      nullable=True)
+    recid             = Column(Integer,      nullable=True)
+    long_description  = Column(Text,         nullable=True)
+
+    add_dt            = Column(Date,         nullable=True)
+    act_eff_dt        = Column(Date,         nullable=True)
+    term_dt           = Column(Date,         nullable=True)
+
+    is_active         = Column(Boolean,      nullable=False, default=True, index=True)
+    data_hash         = Column(String(32),   nullable=True)
+    created_at        = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at        = Column(DateTime(timezone=True), server_default=func.now(),
+                               onupdate=func.now())
+
+    def __repr__(self) -> str:
+        status = "active" if self.is_active else "inactive"
+        return f"<HcpcsCode {self.hcpc} | {status} | {(self.long_description or '')[:40]}>"
+
+
+class HcpcsSyncLog(Base):
+    """Immutable audit log — one row per HCPCS sync run."""
+
+    __tablename__ = "hcpcs_sync_log"
+
+    id            = Column(BigInteger,  primary_key=True, autoincrement=True)
+    synced_at     = Column(DateTime(timezone=True), server_default=func.now(),
+                           nullable=False, index=True)
+    source_url    = Column(Text,        nullable=True)
+    zip_filename  = Column(String(255), nullable=True)
+    update_cycle  = Column(String(30),  nullable=True)
+    total_codes   = Column(Integer,     nullable=True)
+    inserted      = Column(Integer,     default=0, nullable=False)
+    updated       = Column(Integer,     default=0, nullable=False)
+    deleted       = Column(Integer,     default=0, nullable=False)
+    skipped       = Column(Integer,     default=0, nullable=False)
+    status        = Column(String(20),  nullable=False)
+    error_message = Column(Text,        nullable=True)
+
+    def __repr__(self) -> str:
+        return (
+            f"<HcpcsSyncLog {self.update_cycle} | {self.status} | "
+            f"+{self.inserted} ~{self.updated} -{self.deleted}>"
         )

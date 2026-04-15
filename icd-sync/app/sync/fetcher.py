@@ -28,7 +28,7 @@ import io
 import re
 import zipfile
 from datetime import date
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 
 import httpx
 
@@ -70,23 +70,6 @@ def get_chapter(code: str) -> Optional[str]:
     return None
 
 
-def add_dot(code: str) -> str:
-    """
-    Insert a dot after the 3rd character if the code is longer than 3 chars.
-    ICD-10-CM codes are always stored without dots in the CMS file.
-
-    Examples:
-      "A00"    → "A00"        (3 chars — no dot needed)
-      "A001"   → "A00.1"     (4 chars)
-      "A0011"  → "A00.11"    (5 chars)
-      "A00111" → "A00.111"   (6 chars)
-    """
-    code = code.strip()
-    if len(code) > 3:
-        return code[:3] + "." + code[3:]
-    return code
-
-
 def parse_version_from_filename(filename: str) -> str:
     """
     Extract the fiscal year from the CMS filename.
@@ -110,14 +93,14 @@ def get_effective_date(version: str) -> Optional[date]:
         return None
 
 
-def parse_order_file(content: bytes, version: str) -> list[dict]:
+def parse_order_file(content: bytes, version: str) -> List[dict]:
     """
     Parse the raw bytes of a CMS ICD-10-CM order file.
     Returns a list of dicts — one per code line.
 
     Each dict has:
-      code, code_with_dot, description, category,
-      chapter, is_billable, version, effective_date
+      code, description, category, chapter,
+      is_billable, version, effective_date
     """
     records = []
     effective_date = get_effective_date(version)
@@ -137,7 +120,6 @@ def parse_order_file(content: bytes, version: str) -> list[dict]:
 
         records.append({
             "code":           code,
-            "code_with_dot":  add_dot(code),
             "description":    description,
             "category":       code[:3],
             "chapter":        get_chapter(code),
@@ -149,7 +131,7 @@ def parse_order_file(content: bytes, version: str) -> list[dict]:
     return records
 
 
-async def fetch_icd_codes(zip_url: str) -> tuple[list[dict], str]:
+async def fetch_icd_codes(zip_url: str) -> Tuple[List[dict], str]:
     """
     Download the CMS ZIP, extract the order file, parse it.
 

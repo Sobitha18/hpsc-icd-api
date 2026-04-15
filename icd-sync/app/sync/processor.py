@@ -2,28 +2,32 @@
 processor.py
 ------------
 Compares freshly parsed CMS records against the current DB state
-and applies the minimum set of changes needed to bring the DB in sync.
+and applies versioning-based updates to bring the DB in sync.
 
-Logic (3-way diff):
-  new_codes  = codes in CMS file  but NOT in DB  → INSERT
-  updated    = codes in both,     but desc changed → UPDATE
-  deleted    = codes in DB        but NOT in CMS file → DELETE
+Logic (with versioning):
+  new_codes  = codes in CMS file  but NOT in DB  → INSERT with is_active=True
+  changed    = codes in both,     but data differs → mark old inactive, INSERT new version
+  retired    = codes in DB        but NOT in CMS file → mark inactive, set term_dt
 
-Why "minimum set of changes"?
-  ICD-10-CM has ~75,000 codes. Each year only a few hundred actually change.
-  Doing a full wipe + re-insert every year is wasteful and loses created_at
-  audit dates. The diff approach touches only what actually changed.
+Why versioning?
+  ICD-10-CM codes can change (e.g., description updates, billable status).
+  Instead of modifying the old record, we deactivate it and create a new
+  version. This preserves full audit history while keeping only 1 active
+  version per code at any time.
 
 Returns a SyncStats object that the router uses to build the response.
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from datetime import date
+from typing import Dict, List, Optional
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import IcdCode, SyncHistory
+from app.sync.utils import hash_row  # shared with HCPCS processor
 
 logger = logging.getLogger(__name__)
 
@@ -34,25 +38,29 @@ class SyncStats:
     added:   int = 0
     updated: int = 0
     deleted: int = 0
+    skipped: int = 0
     version: str = ""
 
 
 async def sync_icd_codes(
     db: AsyncSession,
-    records: list[dict],
+    records: List[dict],
     version: str,
     source_url: str,
 ) -> SyncStats:
     """
-    Apply the diff between `records` (from CMS) and the current DB.
+    Apply versioning-based sync between `records` (from CMS) and the current DB.
 
     Steps:
-      1. Load all existing codes from DB into memory (just code + description)
+      1. Load all ACTIVE existing codes from DB into memory
       2. Build a lookup dict from the new CMS records
-      3. INSERT codes that are new
-      4. UPDATE codes whose description changed
-      5. DELETE codes that no longer exist in the CMS file
+      3. INSERT codes that are new (is_active=True)
+      4. For codes that changed: mark old as inactive, INSERT new version
+      5. SOFT-DELETE codes not in CMS: mark inactive, set term_dt
       6. Write a SyncHistory row regardless of success/failure
+
+    Versioning: Multiple rows per code are allowed. Only one is marked is_active=True
+    at any time. Old versions remain in DB with is_active=False for audit trail.
 
     Args:
       db         : async DB session
@@ -61,77 +69,81 @@ async def sync_icd_codes(
       source_url : the CMS URL we downloaded from (stored in history)
 
     Returns:
-      SyncStats with counts of what changed
+      SyncStats with counts of what changed (added/updated/deleted/skipped)
     """
     stats = SyncStats(version=version)
 
     # ------------------------------------------------------------------
-    # Step 1: Load existing DB codes into a dict  { code: IcdCode row }
-    # We only need code + description to detect changes — no need to
-    # load all fields.
+    # Step 1: Load existing ACTIVE DB codes into a dict  { code: IcdCode row }
+    # We only track the active version of each code.
     # ------------------------------------------------------------------
-    result = await db.execute(select(IcdCode))
-    existing_rows: dict[str, IcdCode] = {
+    result = await db.execute(select(IcdCode).where(IcdCode.is_active == True))
+    existing_rows: Dict[str, IcdCode] = {
         row.code: row for row in result.scalars().all()
     }
-    logger.info("Loaded %d existing codes from DB", len(existing_rows))
+    logger.info("Loaded %d existing ACTIVE codes from DB", len(existing_rows))
 
     # ------------------------------------------------------------------
     # Step 2: Build a lookup dict from the new CMS records
     # { code: record_dict }
     # ------------------------------------------------------------------
-    new_records: dict[str, dict] = {r["code"]: r for r in records}
+    new_records: Dict[str, dict] = {r["code"]: r for r in records}
     logger.info("Parsed %d codes from CMS file", len(new_records))
 
     # ------------------------------------------------------------------
-    # Step 3 + 4: INSERT new codes / UPDATE changed codes
+    # Step 3 + 4: INSERT new codes / mark old as inactive when changed
+    # Uses versioning: when a code changes, mark the old one inactive
+    # and insert a new row with the new data.
     # ------------------------------------------------------------------
-    to_insert: list[IcdCode] = []
+    to_insert: List[IcdCode] = []
 
     for code, rec in new_records.items():
+        new_hash = hash_row(rec)
+
         if code not in existing_rows:
-            # Brand new code — add it
-            to_insert.append(IcdCode(**rec))
+            # Brand new code — insert with is_active=True
+            to_insert.append(IcdCode(**rec, data_hash=new_hash, is_active=True))
             stats.added += 1
         else:
             existing = existing_rows[code]
-            # Compare every field that CMS can change.
-            # We skip: id, code (it's the key), created_at, updated_at
-            changed = (
-                existing.code_with_dot  != rec["code_with_dot"]
-                or existing.description != rec["description"]
-                or existing.category    != rec["category"]
-                or existing.chapter     != rec["chapter"]
-                or existing.is_billable != rec["is_billable"]
-                or existing.version     != rec["version"]
-                or existing.effective_date != rec["effective_date"]
-            )
-            if changed:
-                existing.code_with_dot  = rec["code_with_dot"]
-                existing.description    = rec["description"]
-                existing.category       = rec["category"]
-                existing.chapter        = rec["chapter"]
-                existing.is_billable    = rec["is_billable"]
-                existing.version        = rec["version"]
-                existing.effective_date = rec["effective_date"]
+            if existing.data_hash is not None and existing.data_hash == new_hash:
+                # Nothing changed — skip
+                stats.skipped += 1
+            else:
+                # Changed — mark old version as inactive and insert new version
+                existing.is_active = False  # deactivate old version
+
+                # Insert new version with new data, is_active=True
+                new_version = IcdCode(
+                    **rec,
+                    data_hash=new_hash,
+                    is_active=True,
+                )
+                to_insert.append(new_version)
                 stats.updated += 1
+                logger.debug(
+                    "Code %s changed — deactivated old version, inserted new version",
+                    code,
+                )
 
     if to_insert:
         db.add_all(to_insert)
-        logger.info("Inserting %d new codes", len(to_insert))
+        logger.info("Inserting %d new code versions", len(to_insert))
 
     # ------------------------------------------------------------------
-    # Step 5: DELETE retired codes
+    # Step 5: SOFT-DELETE retired codes
     # Any code in the DB that is NOT in the new CMS file is retired.
+    # Mark as inactive instead of hard-deleting.
     # ------------------------------------------------------------------
     retired_codes = [code for code in existing_rows if code not in new_records]
 
     if retired_codes:
-        await db.execute(
-            delete(IcdCode).where(IcdCode.code.in_(retired_codes))
-        )
+        today = date.today()
+        for code in retired_codes:
+            existing_rows[code].is_active = False
+            existing_rows[code].term_dt = today
         stats.deleted = len(retired_codes)
-        logger.info("Deleting %d retired codes", stats.deleted)
+        logger.info("Soft-deleted %d retired codes (marked inactive)", stats.deleted)
 
     # ------------------------------------------------------------------
     # Step 6: Commit all changes atomically
@@ -140,8 +152,8 @@ async def sync_icd_codes(
     # ------------------------------------------------------------------
     await db.commit()
     logger.info(
-        "Sync complete — added: %d, updated: %d, deleted: %d",
-        stats.added, stats.updated, stats.deleted,
+        "Sync complete — added: %d, updated: %d, deleted: %d, skipped: %d",
+        stats.added, stats.updated, stats.deleted, stats.skipped,
     )
 
     return stats
@@ -153,7 +165,7 @@ async def record_sync_history(
     version: str,
     stats: SyncStats,
     status: str,
-    error_message: str | None = None,
+    error_message: Optional[str] = None,
 ) -> None:
     """
     Write one row to sync_history.
@@ -165,6 +177,7 @@ async def record_sync_history(
         codes_added=stats.added,
         codes_updated=stats.updated,
         codes_deleted=stats.deleted,
+        codes_skipped=stats.skipped,
         status=status,
         error_message=error_message,
     )

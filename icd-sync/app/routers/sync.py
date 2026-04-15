@@ -1,151 +1,178 @@
 """
 routers/sync.py
 ---------------
-Endpoints that trigger or inspect ICD sync runs.
+Endpoints for triggering sync runs.
 
-  POST /sync/icd            — run a sync right now (manual trigger)
-  GET  /sync/history        — list past sync runs
-  GET  /sync/history/latest — show the most recent sync run
+ICD-10-CM:
+  POST /sync/icd                   — trigger ICD sync
 
-The actual sync work happens in:
-  fetcher.py   → download + parse
-  processor.py → diff + update DB
+HCPCS:
+  POST /sync/hcpcs                 — trigger HCPCS sync
+
+(Sync history is stored in DB tables — check via pgAdmin if needed)
 """
 
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import SyncHistory
-from app.schemas import SyncHistoryItem, SyncResult
+from app.schemas import (
+    HcpcsSyncResult,
+    SyncResult,
+)
 from app.sync.fetcher import fetch_icd_codes
+from app.sync.hcpcs_fetcher import CMS_HCPCS_QUARTERLY_URL, fetch_hcpcs_codes
+from app.sync.hcpcs_processor import (
+    HcpcsSyncStats,
+    record_hcpcs_sync_log,
+    sync_hcpcs_codes,
+)
 from app.sync.processor import SyncStats, record_sync_history, sync_icd_codes
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/sync", tags=["Sync"])
 
-# ---------------------------------------------------------------------------
-# CMS download URL for ICD-10-CM order file.
-# CMS publishes a new ZIP each year. This URL points to the FY2025 release.
-# Update this URL each year when CMS publishes a new release.
-# ---------------------------------------------------------------------------
-CMS_ICD10CM_URL = (
-    "https://www.cms.gov/files/zip/2025-code-descriptions-tabular-order.zip"
-)
+# Default CMS source URLs — override via query param if needed
+_ICD_URL = "https://www.cms.gov/files/zip/2026-code-descriptions-tabular-order.zip"
 
 
-@router.post("/icd", response_model=SyncResult)
+# ---------------------------------------------------------------------------
+# ICD-10-CM sync endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/icd", response_model=SyncResult, summary="Trigger ICD-10-CM sync")
 async def trigger_icd_sync(
     url: str = Query(
-        default=CMS_ICD10CM_URL,
-        description="Override the CMS download URL (leave blank to use default)",
+        default=_ICD_URL,
+        description="CMS ZIP download URL. Defaults to the current FY release.",
     ),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Download the latest ICD-10-CM codes from CMS and sync to the database.
 
-    What happens:
-      1. Downloads the CMS ZIP file (~4 MB)
-      2. Parses ~75,000 code lines from the order file
-      3. Diffs against current DB state
-      4. Inserts new, updates changed, deletes retired codes
-      5. Records the result in sync_history
+    - Downloads the CMS ZIP (~4 MB)
+    - Parses ~97 000 fixed-width lines from the order file
+    - Compares each code's MD5 hash against the stored hash
+    - Inserts new codes, updates changed codes, deletes retired codes
+    - Skips unchanged codes (hash match)
+    - Records the result in icd_sync_history
 
-    Returns counts of what changed and whether it succeeded.
-    This call can take 10–30 seconds depending on CMS server speed.
+    Can take 15–45 seconds on the first run.
+    Subsequent runs are faster because most codes are skipped.
     """
-    stats = SyncStats()
-    status = "failed"
-    error_msg = None
+    stats   = SyncStats()
+    status  = "failed"
+    err_msg: Optional[str] = None
     version = "unknown"
 
     try:
-        logger.info("Starting ICD sync from: %s", url)
-
-        # Step 1 + 2: Download ZIP + parse order file
+        log.info("ICD sync triggered from: %s", url)
         records, version = await fetch_icd_codes(url)
-        logger.info("Fetched %d records for version %s", len(records), version)
-
-        # Step 3 + 4 + 5: Diff + update DB
-        stats = await sync_icd_codes(db, records, version, url)
+        log.info("Fetched %d ICD records (FY%s)", len(records), version)
+        stats  = await sync_icd_codes(db, records, version, url)
         status = "success"
 
     except Exception as exc:
-        error_msg = str(exc)
-        logger.exception("ICD sync failed: %s", error_msg)
+        err_msg = str(exc)
+        log.exception("ICD sync failed: %s", err_msg)
 
     finally:
-        # Always record the outcome — even on failure
         await record_sync_history(
-            db=db,
-            source_url=url,
-            version=version,
-            stats=stats,
-            status=status,
-            error_message=error_msg,
-        )
-
-    if status == "failed":
-        # Return a 200 with status="failed" so the caller still gets details.
-        # Alternatively you could raise HTTPException(500) — your call.
-        return SyncResult(
-            status="failed",
-            version=version,
-            codes_added=stats.added,
-            codes_updated=stats.updated,
-            codes_deleted=stats.deleted,
-            message=f"Sync failed: {error_msg}",
+            db=db, source_url=url, version=version,
+            stats=stats, status=status, error_message=err_msg,
         )
 
     return SyncResult(
-        status="success",
+        status=status,
         version=version,
         codes_added=stats.added,
         codes_updated=stats.updated,
         codes_deleted=stats.deleted,
-        message=f"Sync completed. FY{version} loaded into database.",
+        codes_skipped=stats.skipped,
+        message=(
+            f"Sync completed. FY{version} loaded into database."
+            if status == "success"
+            else f"Sync failed: {err_msg}"
+        ),
     )
 
 
-@router.get("/history", response_model=list[SyncHistoryItem])
-async def list_sync_history(
-    limit: int = Query(20, ge=1, le=100, description="Max rows to return"),
+# ---------------------------------------------------------------------------
+# HCPCS sync endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/hcpcs", response_model=HcpcsSyncResult, summary="Trigger HCPCS sync")
+async def trigger_hcpcs_sync(
+    url: Optional[str] = Query(
+        default=None,
+        description=(
+            "Direct ZIP download URL. "
+            "Leave blank to auto-detect the latest file from the CMS quarterly page."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Return the most recent sync history rows, newest first.
+    Download the latest HCPCS Alpha-Numeric file from CMS and sync to the database.
 
-    Useful for checking:
-      - When was the last successful sync?
-      - How many codes changed in the last run?
-      - Did any run fail?
+    - Scrapes the CMS quarterly update page to find the most recently updated ZIP
+      (or uses the URL you provide directly)
+    - Downloads the ZIP, extracts the ANWEB Excel inside
+    - Compares each code's MD5 hash against the stored hash
+    - Inserts new codes, updates changed codes, deletes retired codes
+    - Skips unchanged codes (hash match)
+    - Records the result in hcpcs_sync_log
+
+    Can take 30–90 seconds on first run (large Excel file).
+    Subsequent runs are much faster because most codes are skipped.
     """
-    result = await db.execute(
-        select(SyncHistory)
-        .order_by(SyncHistory.synced_at.desc())
-        .limit(limit)
+    stats        = HcpcsSyncStats()
+    status       = "failed"
+    err_msg:  Optional[str] = None
+    cycle        = "unknown"
+    zip_filename = "unknown"
+    total_codes  = 0
+
+    try:
+        log.info("HCPCS sync triggered (url=%s)", url or "auto-detect")
+        records, cycle, zip_filename = await fetch_hcpcs_codes(url)
+        total_codes = len(records)
+        log.info("Fetched %d HCPCS records (cycle=%s)", total_codes, cycle)
+        stats  = await sync_hcpcs_codes(db, records, cycle, CMS_HCPCS_QUARTERLY_URL)
+        status = "success"
+
+    except Exception as exc:
+        err_msg = str(exc)
+        log.exception("HCPCS sync failed: %s", err_msg)
+
+    finally:
+        await record_hcpcs_sync_log(
+            db=db,
+            source_url=url or CMS_HCPCS_QUARTERLY_URL,
+            zip_filename=zip_filename,
+            update_cycle=cycle,
+            total_codes=total_codes,
+            stats=stats,
+            status=status,
+            error_message=err_msg,
+        )
+
+    return HcpcsSyncResult(
+        status=status,
+        update_cycle=cycle,
+        zip_filename=zip_filename,
+        codes_inserted=stats.inserted,
+        codes_updated=stats.updated,
+        codes_deleted=stats.deleted,
+        codes_skipped=stats.skipped,
+        message=(
+            f"HCPCS sync completed. Cycle {cycle} loaded into database."
+            if status == "success"
+            else f"HCPCS sync failed: {err_msg}"
+        ),
     )
-    return result.scalars().all()
-
-
-@router.get("/history/latest", response_model=SyncHistoryItem)
-async def get_latest_sync(db: AsyncSession = Depends(get_db)):
-    """
-    Return the single most recent sync run.
-    Quick way to check current DB state.
-    """
-    from fastapi import HTTPException
-
-    result = await db.execute(
-        select(SyncHistory).order_by(SyncHistory.synced_at.desc()).limit(1)
-    )
-    latest = result.scalar_one_or_none()
-
-    if latest is None:
-        raise HTTPException(status_code=404, detail="No sync runs recorded yet")
-
-    return latest

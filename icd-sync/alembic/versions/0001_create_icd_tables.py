@@ -33,6 +33,7 @@ def upgrade() -> None:
         sa.Column("is_billable",    sa.Boolean(),      nullable=False, default=False),
         sa.Column("version",        sa.String(10),     nullable=False),
         sa.Column("effective_date", sa.Date(),         nullable=True),
+        sa.Column("data_hash",      sa.String(32),     nullable=True),
         sa.Column("created_at",     sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("updated_at",     sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.PrimaryKeyConstraint("id"),
@@ -44,10 +45,10 @@ def upgrade() -> None:
     op.create_index("ix_icd_codes_is_billable", "icd_codes", ["is_billable"])
 
     # ------------------------------------------------------------------
-    # sync_history
+    # icd_sync_history
     # ------------------------------------------------------------------
     op.create_table(
-        "sync_history",
+        "icd_sync_history",
         sa.Column("id",            sa.Integer(),      autoincrement=True, nullable=False),
         sa.Column("synced_at",     sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("source_url",    sa.Text(),         nullable=False),
@@ -55,17 +56,18 @@ def upgrade() -> None:
         sa.Column("codes_added",   sa.Integer(),      nullable=False, default=0),
         sa.Column("codes_updated", sa.Integer(),      nullable=False, default=0),
         sa.Column("codes_deleted", sa.Integer(),      nullable=False, default=0),
+        sa.Column("codes_skipped", sa.Integer(),      nullable=False, default=0),
         sa.Column("status",        sa.String(20),     nullable=False),
         sa.Column("error_message", sa.Text(),         nullable=True),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_sync_history_synced_at", "sync_history", ["synced_at"])
+    op.create_index("ix_icd_sync_history_synced_at", "icd_sync_history", ["synced_at"])
 
 
 def downgrade() -> None:
     # Undo in reverse order
-    op.drop_index("ix_sync_history_synced_at", table_name="sync_history")
-    op.drop_table("sync_history")
+    op.drop_index("ix_icd_sync_history_synced_at", table_name="icd_sync_history")
+    op.drop_table("icd_sync_history")
 
     op.drop_index("ix_icd_codes_is_billable", table_name="icd_codes")
     op.drop_index("ix_icd_codes_category",    table_name="icd_codes")
