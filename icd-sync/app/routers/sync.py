@@ -7,7 +7,7 @@ Routes to appropriate handler based on code_type parameter.
 import logging
 from typing import Optional, Union
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -50,7 +50,10 @@ async def sync_codes(
 
     handler = _sync_handlers.get(code_type)
     if not handler:
-        return {"error": f"Invalid code_type: {code_type}. Use 'icd' or 'hcpcs'"}
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid code_type: {code_type}. Use 'icd' or 'hcpcs'"
+        )
 
     return await handler(url, db)
 
@@ -102,7 +105,7 @@ async def _sync_hcpcs(url: Optional[str], db: AsyncSession) -> HcpcsSyncResult:
         status=status,
         update_cycle=cycle,
         zip_filename=zip_filename,
-        codes_inserted=stats.inserted,
+        codes_inserted=stats.added,
         codes_updated=stats.updated,
         codes_deleted=stats.deleted,
         codes_skipped=stats.skipped,
