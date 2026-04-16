@@ -15,6 +15,7 @@ from app.schemas import HcpcsSyncResult, SyncResult
 from app.sync.icd_fetcher import fetch_icd_codes
 from app.sync.hcpcs_fetcher import CMS_HCPCS_QUARTERLY_URL, fetch_hcpcs_codes
 from app.sync.hcpcs_processor import HcpcsSyncStats, record_hcpcs_sync_log, sync_hcpcs_codes
+from app.sync.hcpcs_modifier_processor import HcpcsModifierSyncStats, record_hcpcs_modifier_sync_log, sync_hcpcs_modifiers
 from app.sync.icd_processor import SyncStats, record_sync_history, sync_icd_codes
 
 log = logging.getLogger(__name__)
@@ -85,29 +86,61 @@ async def _sync_icd(url: str, db: AsyncSession) -> SyncResult:
 
 
 async def _sync_hcpcs(url: Optional[str], db: AsyncSession) -> HcpcsSyncResult:
-    """Sync HCPCS codes."""
-    stats, status, err_msg = HcpcsSyncStats(), "failed", None
-    cycle, zip_filename, total_codes = "unknown", "unknown", 0
+    """Sync HCPCS modifiers and codes."""
+    mod_stats = HcpcsModifierSyncStats()
+    code_stats = HcpcsSyncStats()
+    status, err_msg = "failed", None
+    cycle, zip_filename = "unknown", "unknown"
 
     try:
         log.info("HCPCS sync triggered")
-        records, cycle, zip_filename = await fetch_hcpcs_codes(url)
-        total_codes = len(records)
-        stats = await sync_hcpcs_codes(db, records, cycle, CMS_HCPCS_QUARTERLY_URL)
+        modifiers, codes, cycle, zip_filename = await fetch_hcpcs_codes(url)
+
+        # Sync modifiers
+        if modifiers:
+            log.info("Syncing %d modifiers", len(modifiers))
+            mod_stats = await sync_hcpcs_modifiers(db, modifiers, cycle, CMS_HCPCS_QUARTERLY_URL)
+            await record_hcpcs_modifier_sync_log(
+                db, url or CMS_HCPCS_QUARTERLY_URL, zip_filename, cycle,
+                len(modifiers), mod_stats, "success", None
+            )
+
+        # Sync codes
+        if codes:
+            log.info("Syncing %d codes", len(codes))
+            code_stats = await sync_hcpcs_codes(db, codes, cycle, CMS_HCPCS_QUARTERLY_URL)
+            await record_hcpcs_sync_log(
+                db, url or CMS_HCPCS_QUARTERLY_URL, zip_filename, cycle,
+                len(codes), code_stats, "success", None
+            )
+
         status = "success"
     except Exception as exc:
         err_msg = str(exc)
         log.exception("HCPCS sync failed: %s", err_msg)
     finally:
-        await record_hcpcs_sync_log(db, url or CMS_HCPCS_QUARTERLY_URL, zip_filename, cycle, total_codes, stats, status, err_msg)
+        # Only record error if sync failed (no partial success logs)
+        if status == "failed":
+            await record_hcpcs_modifier_sync_log(
+                db, url or CMS_HCPCS_QUARTERLY_URL, zip_filename, cycle,
+                0, mod_stats, status, err_msg
+            )
+            await record_hcpcs_sync_log(
+                db, url or CMS_HCPCS_QUARTERLY_URL, zip_filename, cycle,
+                0, code_stats, status, err_msg
+            )
 
     return HcpcsSyncResult(
         status=status,
         update_cycle=cycle,
         zip_filename=zip_filename,
-        codes_inserted=stats.added,
-        codes_updated=stats.updated,
-        codes_deleted=stats.deleted,
-        codes_skipped=stats.skipped,
+        modifiers_inserted=mod_stats.added,
+        modifiers_updated=mod_stats.updated,
+        modifiers_deleted=mod_stats.deleted,
+        modifiers_skipped=mod_stats.skipped,
+        codes_inserted=code_stats.added,
+        codes_updated=code_stats.updated,
+        codes_deleted=code_stats.deleted,
+        codes_skipped=code_stats.skipped,
         message=f"HCPCS sync completed. Cycle {cycle} loaded." if status == "success" else f"Sync failed: {err_msg}",
     )

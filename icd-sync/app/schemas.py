@@ -169,14 +169,18 @@ class PaginatedHcpcsCodes(BaseModel):
 
 
 class HcpcsSyncResult(BaseModel):
-    status:         str           = Field(example="success")
-    update_cycle:   Optional[str] = Field(None, example="APR2026")
-    zip_filename:   Optional[str] = Field(None, example="april-2026-alpha-numeric-hcpcs-file.zip")
-    codes_inserted: int           = Field(example=50)
-    codes_updated:  int           = Field(example=120)
-    codes_deleted:  int           = Field(example=10)
-    codes_skipped:  int           = Field(example=6800)
-    message:        str           = Field(example="HCPCS sync completed successfully")
+    status:              str           = Field(example="success")
+    update_cycle:        Optional[str] = Field(None, example="APR2026")
+    zip_filename:        Optional[str] = Field(None, example="april-2026-alpha-numeric-hcpcs-file.zip")
+    modifiers_inserted:  int           = Field(example=10)
+    modifiers_updated:   int           = Field(example=2)
+    modifiers_deleted:   int           = Field(example=0)
+    modifiers_skipped:   int           = Field(example=90)
+    codes_inserted:      int           = Field(example=50)
+    codes_updated:       int           = Field(example=120)
+    codes_deleted:       int           = Field(example=10)
+    codes_skipped:       int           = Field(example=6800)
+    message:             str           = Field(example="HCPCS sync completed successfully")
 
 
 class HcpcsSyncLogItem(BaseModel):

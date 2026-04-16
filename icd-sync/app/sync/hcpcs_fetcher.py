@@ -2,16 +2,15 @@
 sync/hcpcs_fetcher.py
 ---------------------
 Downloads the latest HCPCS Alpha-Numeric ZIP from CMS and parses
-the ANWEB Excel file inside it into a list of dicts ready for the
-processor.
+the ANWEB Excel file inside it into separate lists of modifiers and codes.
 
 Flow:
   1. GET CMS quarterly update page → scrape latest Alpha-Numeric ZIP URL
      (picks the one with the most recent "Updated MM/DD/YYYY" date)
   2. Download the ZIP into memory (no temp files on disk)
   3. Open ZIP → find the Excel file that has a SEQNUM column (= ANWEB file)
-  4. Parse every row → list[dict] with DB column names
-  5. Return (records, cycle, zip_filename)
+  4. Parse every row → separate modifiers (len==2) from codes (len>2)
+  5. Return (modifiers, codes, cycle, zip_filename)
 
 All network I/O is async (httpx). Pandas read_excel is sync — it runs
 in a thread pool via run_in_executor so the event loop is never blocked.
@@ -171,11 +170,12 @@ def _scrape_latest_zip_url(html: str) -> Tuple[str, str]:
     return zip_url, zip_filename
 
 
-def _parse_zip_to_records(zip_bytes: bytes) -> Tuple[List[dict], str]:
+def _parse_zip_to_records(zip_bytes: bytes) -> Tuple[List[dict], List[dict], str]:
     """
     Blocking function — runs in thread pool.
     Opens ZIP in memory, finds the ANWEB Excel (has SEQNUM column),
-    parses every row, returns (records, excel_filename).
+    parses every row, separates modifiers (len==2) from codes (len>2).
+    Returns (modifiers, codes, excel_filename).
     """
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
         excel_files = [
@@ -202,13 +202,21 @@ def _parse_zip_to_records(zip_bytes: bytes) -> Tuple[List[dict], str]:
 
             log.info("ANWEB file identified: %s (%d rows)", name, len(df))
 
-            records = []
+            modifiers = []
+            codes = []
             for _, row in df.iterrows():
                 rec = _row_to_dict(row)
                 if rec.get("hcpc"):          # skip rows with no code
-                    records.append(rec)
+                    hcpc = rec["hcpc"]
+                    if len(hcpc) == 2:
+                        modifiers.append(rec)
+                        log.debug("Modifier: %s", hcpc)
+                    elif len(hcpc) > 2:
+                        codes.append(rec)
+                        log.debug("Code: %s", hcpc)
 
-            return records, name
+            log.info("Separated into modifiers=%d, codes=%d", len(modifiers), len(codes))
+            return modifiers, codes, name
 
     raise RuntimeError(
         f"No ANWEB Excel (SEQNUM column) found in ZIP. Files present: {excel_files}"
@@ -221,7 +229,7 @@ def _parse_zip_to_records(zip_bytes: bytes) -> Tuple[List[dict], str]:
 
 async def fetch_hcpcs_codes(
     url: Optional[str] = None,
-) -> Tuple[List[dict], str, str]:
+) -> Tuple[List[dict], List[dict], str, str]:
     """
     Download the latest HCPCS Alpha-Numeric file from CMS and parse it.
 
@@ -230,8 +238,9 @@ async def fetch_hcpcs_codes(
            scraped to find the most recently updated file.
 
     Returns:
-      (records, cycle, zip_filename)
-        records      — list of dicts ready for the processor
+      (modifiers, codes, cycle, zip_filename)
+        modifiers    — list of 2-char modifier dicts ready for the processor
+        codes        — list of procedure code dicts ready for the processor
         cycle        — e.g. "APR2026"
         zip_filename — e.g. "april-2026-alpha-numeric-hcpcs-file.zip"
 
@@ -262,13 +271,13 @@ async def fetch_hcpcs_codes(
 
     # pandas.read_excel is blocking — offload to thread pool
     loop = asyncio.get_event_loop()
-    records, excel_filename = await loop.run_in_executor(
+    modifiers, codes, excel_filename = await loop.run_in_executor(
         None, partial(_parse_zip_to_records, zip_bytes)
     )
 
     cycle = derive_cycle(zip_filename)
     log.info(
-        "Parsed %d HCPCS records | cycle=%s | source=%s",
-        len(records), cycle, excel_filename,
+        "Parsed %d HCPCS records (modifiers=%d, codes=%d) | cycle=%s | source=%s",
+        len(modifiers) + len(codes), len(modifiers), len(codes), cycle, excel_filename,
     )
-    return records, cycle, zip_filename
+    return modifiers, codes, cycle, zip_filename
