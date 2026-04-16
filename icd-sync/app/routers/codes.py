@@ -1,7 +1,7 @@
 """
 routers/codes.py
 ----------------
-Read-only endpoints for querying ICD-10-CM and HCPCS codes.
+Read-only endpoints for querying ICD-10-CM, HCPCS, and ICD-10-PCS codes.
 
 ICD-10-CM:
   GET /codes/icd                    paginated list with filters
@@ -11,6 +11,11 @@ ICD-10-CM:
 HCPCS:
   GET /codes/hcpcs                  paginated list with filters
   GET /codes/hcpcs/{code}           single code lookup
+
+ICD-10-PCS:
+  GET /codes/icd_pcs                paginated list with filters
+  GET /codes/icd_pcs/{code}         single code lookup
+  GET /codes/icd_pcs/section/{sec}  all codes in a PCS section
 """
 
 import logging
@@ -21,12 +26,14 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import HcpcsCode, IcdCode
+from app.models import HcpcsCode, IcdCode, IcdPcsCode
 from app.schemas import (
     HcpcsCodeDetail,
     IcdCodeDetail,
+    IcdPcsCodeDetail,
     PaginatedHcpcsCodes,
     PaginatedIcdCodes,
+    PaginatedIcdPcsCodes,
 )
 
 log = logging.getLogger(__name__)
@@ -206,4 +213,111 @@ async def get_hcpcs_code(
 
     if row is None:
         raise HTTPException(status_code=404, detail=f"HCPCS code '{code.upper()}' not found")
+    return row
+
+
+# ---------------------------------------------------------------------------
+# ICD-10-PCS endpoints
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/icd_pcs",
+    response_model=PaginatedIcdPcsCodes,
+    summary="List ICD-10-PCS codes",
+)
+async def list_icd_pcs_codes(
+    q:          Optional[str] = Query(None,  description="Search in description (case-insensitive)"),
+    section:    Optional[str] = Query(None,  description="Single-char section, e.g. '0' for Medical and Surgical"),
+    valid_only: bool          = Query(False,  description="Return only valid (billable) codes"),
+    page:       int           = Query(1,  ge=1,        description="Page number (1-based)"),
+    size:       int           = Query(50, ge=1, le=200, description="Results per page"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Search and paginate ICD-10-PCS inpatient procedure codes.
+
+    Examples:
+      GET /codes/icd_pcs?q=bypass
+      GET /codes/icd_pcs?section=0&valid_only=true
+      GET /codes/icd_pcs?q=cardiac&page=2&size=100
+    """
+    query = select(IcdPcsCode).where(IcdPcsCode.is_active.is_(True))
+
+    if q:
+        query = query.where(IcdPcsCode.description.ilike(f"%{q}%"))
+    if section:
+        query = query.where(IcdPcsCode.section == section.upper())
+    if valid_only:
+        query = query.where(IcdPcsCode.is_valid.is_(True))
+
+    total = (
+        await db.execute(select(func.count()).select_from(query.subquery()))
+    ).scalar_one()
+
+    offset = (page - 1) * size
+    rows = (
+        await db.execute(query.order_by(IcdPcsCode.code).offset(offset).limit(size))
+    ).scalars().all()
+
+    return PaginatedIcdPcsCodes(total=total, page=page, size=size, results=rows)
+
+
+@router.get(
+    "/icd_pcs/section/{section}",
+    response_model=List[IcdPcsCodeDetail],
+    summary="Get all ICD-10-PCS codes in a section",
+)
+async def get_icd_pcs_codes_by_section(
+    section: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Return all active codes within a single-character ICD-10-PCS section.
+
+    Example:
+      GET /codes/icd_pcs/section/0  → all Medical and Surgical codes
+      GET /codes/icd_pcs/section/B  → all Imaging codes
+    """
+    rows = (
+        await db.execute(
+            select(IcdPcsCode)
+            .where(IcdPcsCode.section == section.upper())
+            .where(IcdPcsCode.is_active.is_(True))
+            .order_by(IcdPcsCode.code)
+        )
+    ).scalars().all()
+
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No ICD-10-PCS codes found for section '{section.upper()}'",
+        )
+    return rows
+
+
+@router.get(
+    "/icd_pcs/{code}",
+    response_model=IcdPcsCodeDetail,
+    summary="Get ICD-10-PCS code",
+)
+async def get_icd_pcs_code(
+    code: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Fetch a single active ICD-10-PCS code (7 characters, no dots).
+
+    Example:
+      GET /codes/icd_pcs/0016070
+    """
+    row = (
+        await db.execute(
+            select(IcdPcsCode)
+            .where(IcdPcsCode.code == code.upper())
+            .where(IcdPcsCode.is_active.is_(True))
+        )
+    ).scalar_one_or_none()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"ICD-10-PCS code '{code.upper()}' not found")
     return row
