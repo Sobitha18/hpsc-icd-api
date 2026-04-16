@@ -22,6 +22,12 @@ router = APIRouter(prefix="/sync", tags=["Sync"])
 
 _ICD_URL = "https://www.cms.gov/files/zip/2026-code-descriptions-tabular-order.zip"
 
+# Handler registry for code type routing
+_sync_handlers = {
+    "icd": lambda url, db: _sync_icd(url or _ICD_URL, db),
+    "hcpcs": lambda url, db: _sync_hcpcs(url, db),
+}
+
 
 @router.post("/codes", response_model=Union[SyncResult, HcpcsSyncResult])
 async def sync_codes(
@@ -42,12 +48,11 @@ async def sync_codes(
     - POST /sync/codes?code_type=icd&url=https://...
     """
 
-    if code_type == "icd":
-        return await _sync_icd(url or _ICD_URL, db)
-    elif code_type == "hcpcs":
-        return await _sync_hcpcs(url, db)
-    else:
+    handler = _sync_handlers.get(code_type)
+    if not handler:
         return {"error": f"Invalid code_type: {code_type}. Use 'icd' or 'hcpcs'"}
+
+    return await handler(url, db)
 
 
 async def _sync_icd(url: str, db: AsyncSession) -> SyncResult:
