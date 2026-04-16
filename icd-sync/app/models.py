@@ -5,11 +5,13 @@ SQLAlchemy ORM models — one class per DB table.
 
 Tables:
   icd_codes               — current ICD-10-CM diagnosis codes (annual CMS release)
-  icd_sync_history        — audit log of every ICD sync run
+  icd_sync_history        — audit log of every ICD-10-CM sync run
   hcpcs_modifiers         — current HCPCS modifiers (2-char codes, quarterly CMS release)
   hcpcs_modifier_sync_log — audit log of every HCPCS modifier sync run
   hcpcs_codes             — current HCPCS procedure codes (quarterly CMS release)
   hcpcs_sync_log          — audit log of every HCPCS sync run
+  icd_pcs_codes           — current ICD-10-PCS procedure codes (annual CMS release)
+  icd_pcs_sync_history    — audit log of every ICD-10-PCS sync run
 """
 
 from sqlalchemy import (
@@ -180,4 +182,70 @@ class HcpcsSyncLog(Base):
         return (
             f"<HcpcsSyncLog {self.update_cycle} | {self.status} | "
             f"+{self.inserted} ~{self.updated} -{self.deleted}>"
+        )
+
+
+# ---------------------------------------------------------------------------
+# ICD-10-PCS
+# ---------------------------------------------------------------------------
+
+class IcdPcsCode(Base):
+    """
+    ICD-10-PCS inpatient procedure codes with versioning.
+    Multiple rows per code allowed (only 1 active at a time).
+
+    A PCS code is exactly 7 alphanumeric characters (no dot notation):
+      Char 1 — Section        (e.g. 0 = Medical and Surgical)
+      Char 2 — Body System
+      Char 3 — Root Operation
+      Char 4 — Body Part
+      Char 5 — Approach
+      Char 6 — Device
+      Char 7 — Qualifier
+    """
+
+    __tablename__ = "icd_pcs_codes"
+
+    id             = Column(Integer,  primary_key=True, autoincrement=True)
+    code           = Column(String(7),   nullable=False, index=True)   # NOT unique — allows versions
+    description    = Column(Text,        nullable=False)
+    section        = Column(String(1),   nullable=True,  index=True)   # first char of the code
+    section_name   = Column(String(100), nullable=True)                # human-readable section label
+    is_valid       = Column(Boolean,     nullable=False, default=True, index=True)  # 1 = valid/billable
+    version        = Column(String(10),  nullable=False)
+    effective_date = Column(Date,        nullable=True)
+
+    is_active      = Column(Boolean,     nullable=False, default=True, index=True)
+    term_dt        = Column(Date,        nullable=True)
+    data_hash      = Column(String(32),  nullable=True)
+    created_at     = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at     = Column(DateTime(timezone=True), server_default=func.now(),
+                            onupdate=func.now(), nullable=False)
+
+    def __repr__(self) -> str:
+        status = "active" if self.is_active else "inactive"
+        return f"<IcdPcsCode {self.code} | {status} | {self.description[:40]}>"
+
+
+class IcdPcsSyncHistory(Base):
+    """Immutable audit log — one row per ICD-10-PCS sync run."""
+
+    __tablename__ = "icd_pcs_sync_history"
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    synced_at     = Column(DateTime(timezone=True), server_default=func.now(),
+                           nullable=False, index=True)
+    source_url    = Column(Text,        nullable=False)
+    version       = Column(String(10),  nullable=True)
+    codes_added   = Column(Integer,     default=0, nullable=False)
+    codes_updated = Column(Integer,     default=0, nullable=False)
+    codes_deleted = Column(Integer,     default=0, nullable=False)
+    codes_skipped = Column(Integer,     default=0, nullable=False)
+    status        = Column(String(20),  nullable=False)
+    error_message = Column(Text,        nullable=True)
+
+    def __repr__(self) -> str:
+        return (
+            f"<IcdPcsSyncHistory FY{self.version} | {self.status} | "
+            f"+{self.codes_added} ~{self.codes_updated} -{self.codes_deleted}>"
         )

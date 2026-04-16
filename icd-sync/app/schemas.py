@@ -15,8 +15,14 @@ HCPCS:
   HcpcsSyncResult   — POST /sync/hcpcs response
   HcpcsSyncLogItem  — GET /sync/hcpcs/history row
 
+ICD-10-PCS:
+  IcdPcsCodeBase       — light list view
+  IcdPcsCodeDetail     — full single-code view
+  IcdPcsSyncResult     — POST /sync/icd_pcs response
+  IcdPcsSyncHistoryItem — GET /sync/icd_pcs/history row
+
 Shared:
-  PaginatedIcdCodes / PaginatedHcpcsCodes — paginated list wrappers
+  PaginatedIcdCodes / PaginatedHcpcsCodes / PaginatedIcdPcsCodes — paginated list wrappers
 """
 
 from datetime import date, datetime
@@ -194,6 +200,64 @@ class HcpcsSyncLogItem(BaseModel):
     updated:       int
     deleted:       int
     skipped:       int
+    status:        str
+    error_message: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ---------------------------------------------------------------------------
+# ICD-10-PCS schemas
+# ---------------------------------------------------------------------------
+
+class IcdPcsCodeBase(BaseModel):
+    code:         str           = Field(example="0016070")
+    description:  str           = Field(example="Bypass Cerebral Ventricle to Nasopharynx with Autologous Tissue Substitute, Open Approach")
+    section:      Optional[str] = Field(None, example="0")
+    section_name: Optional[str] = Field(None, example="Medical and Surgical")
+    is_valid:     bool          = Field(example=True)
+
+    class Config:
+        from_attributes = True
+
+
+class IcdPcsCodeDetail(IcdPcsCodeBase):
+    version:        str            = Field(example="2026")
+    effective_date: Optional[date] = Field(None, example="2025-10-01")
+    created_at:     datetime
+    updated_at:     datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PaginatedIcdPcsCodes(BaseModel):
+    total:   int                  = Field(example=78000)
+    page:    int                  = Field(example=1)
+    size:    int                  = Field(example=50)
+    results: List[IcdPcsCodeBase]
+
+
+class IcdPcsSyncResult(BaseModel):
+    status:        str           = Field(example="success")
+    version:       Optional[str] = Field(None, example="2026")
+    codes_added:   int           = Field(example=200)
+    codes_updated: int           = Field(example=400)
+    codes_deleted: int           = Field(example=20)
+    codes_skipped: int           = Field(example=77000)
+    message:       str           = Field(example="ICD-10-PCS sync completed successfully")
+
+
+class IcdPcsSyncHistoryItem(BaseModel):
+    id:            int
+    synced_at:     datetime
+    source_url:    str
+    version:       Optional[str]
+    codes_added:   int
+    codes_updated: int
+    codes_deleted: int
+    codes_skipped: int
     status:        str
     error_message: Optional[str] = None
 
