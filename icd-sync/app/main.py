@@ -53,41 +53,13 @@ scheduler = AsyncIOScheduler()
 
 
 async def scheduled_icd_sync():
-    """
-    Called automatically by the scheduler on October 1 each year.
-    Reuses the same sync logic as the manual POST /sync/icd endpoint.
-    """
+    """Called automatically by the scheduler on October 1 each year."""
     logger.info("Scheduled ICD sync starting...")
-    from app.sync.fetcher import fetch_icd_codes
-    from app.sync.processor import SyncStats, record_sync_history, sync_icd_codes
-    from app.routers.sync import CMS_ICD10CM_URL
-
-    stats = SyncStats()
-    status = "failed"
-    error_msg = None
-    version = "unknown"
+    from app.routers.sync import _sync_icd, _ICD_URL
 
     async with AsyncSessionLocal() as db:
-        try:
-            records, version = await fetch_icd_codes(CMS_ICD10CM_URL)
-            stats = await sync_icd_codes(db, records, version, CMS_ICD10CM_URL)
-            status = "success"
-            logger.info(
-                "Scheduled sync done — +%d ~%d -%d",
-                stats.added, stats.updated, stats.deleted,
-            )
-        except Exception as exc:
-            error_msg = str(exc)
-            logger.exception("Scheduled ICD sync failed: %s", error_msg)
-        finally:
-            await record_sync_history(
-                db=db,
-                source_url=CMS_ICD10CM_URL,
-                version=version,
-                stats=stats,
-                status=status,
-                error_message=error_msg,
-            )
+        result = await _sync_icd(_ICD_URL, db)
+        logger.info("Scheduled sync done — status=%s", result.status)
 
 
 # ---------------------------------------------------------------------------
