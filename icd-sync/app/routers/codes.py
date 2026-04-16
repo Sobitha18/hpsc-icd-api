@@ -68,10 +68,6 @@ async def list_icd_codes(
         query = query.where(IcdCode.description.ilike(f"%{q}%"))
     if category:
         query = query.where(IcdCode.category == category.upper())
-    if chapter:
-        query = query.where(IcdCode.chapter.ilike(f"%{chapter}%"))
-    if billable_only:
-        query = query.where(IcdCode.is_billable.is_(True))
 
     total = (
         await db.execute(select(func.count()).select_from(query.subquery()))
@@ -168,7 +164,7 @@ async def list_hcpcs_codes(
         query = query.where(
             or_(
                 HcpcsCode.short_description.ilike(f"%{q}%"),
-                HcpcsCode.long_description.ilike(f"%{q}%"),
+                HcpcsCode.description.ilike(f"%{q}%"),
             )
         )
     if betos:
@@ -184,7 +180,7 @@ async def list_hcpcs_codes(
 
     offset = (page - 1) * size
     rows = (
-        await db.execute(query.order_by(HcpcsCode.hcpc).offset(offset).limit(size))
+        await db.execute(query.order_by(HcpcsCode.code).offset(offset).limit(size))
     ).scalars().all()
 
     return PaginatedHcpcsCodes(total=total, page=page, size=size, results=rows)
@@ -207,7 +203,7 @@ async def get_hcpcs_code(
     """
     row = (
         await db.execute(
-            select(HcpcsCode).where(HcpcsCode.hcpc == code.upper())
+            select(HcpcsCode).where(HcpcsCode.code == code.upper())
         )
     ).scalar_one_or_none()
 
@@ -246,9 +242,7 @@ async def list_icd_pcs_codes(
     if q:
         query = query.where(IcdPcsCode.description.ilike(f"%{q}%"))
     if section:
-        query = query.where(IcdPcsCode.section == section.upper())
-    if valid_only:
-        query = query.where(IcdPcsCode.is_valid.is_(True))
+        query = query.where(IcdPcsCode.category == section.upper())
 
     total = (
         await db.execute(select(func.count()).select_from(query.subquery()))
@@ -281,7 +275,7 @@ async def get_icd_pcs_codes_by_section(
     rows = (
         await db.execute(
             select(IcdPcsCode)
-            .where(IcdPcsCode.section == section.upper())
+            .where(IcdPcsCode.category == section.upper())
             .where(IcdPcsCode.is_active.is_(True))
             .order_by(IcdPcsCode.code)
         )

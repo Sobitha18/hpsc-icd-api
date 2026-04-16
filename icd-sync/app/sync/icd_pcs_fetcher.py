@@ -108,11 +108,10 @@ def parse_order_file(content: bytes, version: str) -> List[dict]:
     Returns a list of dicts — one per code line.
 
     Each dict has:
-      code, description, section, section_name,
-      is_valid, version, effective_date
+      code, description, category, eff_date
     """
     records = []
-    effective_date = get_effective_date(version)
+    eff_date = get_effective_date(version)
 
     for raw_line in content.decode("utf-8", errors="replace").splitlines():
         # Lines shorter than 17 chars have no description — skip
@@ -121,20 +120,16 @@ def parse_order_file(content: bytes, version: str) -> List[dict]:
 
         # Fixed-width column extraction (same offsets as ICD-10-CM order file)
         code        = raw_line[6:13].strip()   # chars 7-13 (0-indexed: 6-13)
-        valid_flag  = raw_line[14:15].strip()  # char 15    (0-indexed: 14)
         description = raw_line[16:77].strip()  # chars 17-77 (0-indexed: 16-77)
 
         if not code or not description:
             continue
 
         records.append({
-            "code":           code,
-            "description":    description,
-            "section":        code[0].upper() if code else None,
-            "section_name":   get_section_name(code),
-            "is_valid":       valid_flag == "1",
-            "version":        version,
-            "effective_date": effective_date,
+            "code":        code,
+            "description": description,
+            "category":    code[0].upper() if code else None,
+            "eff_date":    eff_date,
         })
 
     return records

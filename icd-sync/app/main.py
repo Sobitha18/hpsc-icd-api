@@ -24,7 +24,7 @@ from sqlalchemy import text
 
 from app.database import AsyncSessionLocal, Base, engine
 from app.models import HcpcsCode, HcpcsSyncLog, IcdCode, IcdPcsCode, IcdPcsSyncHistory, SyncHistory  # noqa: F401 — ensures all tables are registered with Base before create_all
-from app.routers import sync
+from app.routers import codes, sync
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -45,6 +45,7 @@ app = FastAPI(
 )
 
 # Register routers
+app.include_router(codes.router)
 app.include_router(sync.router)
 
 # ---------------------------------------------------------------------------

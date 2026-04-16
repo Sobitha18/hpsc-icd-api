@@ -95,13 +95,11 @@ def _clean_num(val) -> Optional[float]:
 def _row_to_dict(row: "pd.Series") -> dict:
     """Map one ANWEB Excel row to our simplified DB column names."""
     return {
-        "hcpc":              _clean_str(row.get("HCPC")),
-        "seqnum":            int(row["SEQNUM"])   if pd.notna(row.get("SEQNUM"))  else None,
-        "recid":             int(row["RECID"])    if pd.notna(row.get("RECID"))   else None,
-        "long_description":  _clean_str(row.get("LONG DESCRIPTION")),
-        "add_dt":            _parse_date(row.get("ADD DT")),
-        "act_eff_dt":        _parse_date(row.get("ACT EFF DT")),
-        "term_dt":           _parse_date(row.get("TERM DT")),
+        "code":        _clean_str(row.get("HCPC")),
+        "description": _clean_str(row.get("LONG DESCRIPTION")),
+        "category":    None,
+        "eff_date":    _parse_date(row.get("ACT EFF DT")),
+        "term_dt":     _parse_date(row.get("TERM DT")),
     }
 
 
@@ -206,14 +204,14 @@ def _parse_zip_to_records(zip_bytes: bytes) -> Tuple[List[dict], List[dict], str
             codes = []
             for _, row in df.iterrows():
                 rec = _row_to_dict(row)
-                if rec.get("hcpc"):          # skip rows with no code
-                    hcpc = rec["hcpc"]
-                    if len(hcpc) == 2:
+                if rec.get("code"):          # skip rows with no code
+                    code = rec["code"]
+                    if len(code) == 2:
                         modifiers.append(rec)
-                        log.debug("Modifier: %s", hcpc)
-                    elif len(hcpc) > 2:
+                        log.debug("Modifier: %s", code)
+                    elif len(code) > 2:
                         codes.append(rec)
-                        log.debug("Code: %s", hcpc)
+                        log.debug("Code: %s", code)
 
             log.info("Separated into modifiers=%d, codes=%d", len(modifiers), len(codes))
             return modifiers, codes, name

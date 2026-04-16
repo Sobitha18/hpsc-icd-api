@@ -26,18 +26,15 @@ from app.database import Base
 # ---------------------------------------------------------------------------
 
 class IcdCode(Base):
-    """ICD-10-CM diagnosis codes with versioning. Multiple rows per code allowed (only 1 active)."""
+    """ICD-10-CM diagnosis codes."""
 
     __tablename__ = "icd_codes"
 
     id             = Column(Integer,  primary_key=True, autoincrement=True)
-    code           = Column(String(10),  nullable=False, index=True)  # NOT unique — allows versions
+    code           = Column(String(10),  nullable=False, index=True)
     description    = Column(Text,        nullable=False)
     category       = Column(String(3),   nullable=False, index=True)
-    chapter        = Column(String(80),  nullable=True)
-    is_billable    = Column(Boolean,     nullable=False, default=False, index=True)
-    version        = Column(String(10),  nullable=False)
-    effective_date = Column(Date,        nullable=True)
+    eff_date       = Column(Date,        nullable=True)
 
     is_active      = Column(Boolean,     nullable=False, default=True, index=True)
     term_dt        = Column(Date,        nullable=True)
@@ -48,7 +45,7 @@ class IcdCode(Base):
 
     def __repr__(self) -> str:
         status = "active" if self.is_active else "inactive"
-        return f"<IcdCode {self.code_with_dot} | {status} | {self.description[:40]}>"
+        return f"<IcdCode {self.code} | {status} | {self.description[:40]}>"
 
 
 class SyncHistory(Base):
@@ -80,19 +77,15 @@ class SyncHistory(Base):
 # ---------------------------------------------------------------------------
 
 class HcpcsModifier(Base):
-    """HCPCS modifiers (2-character codes) with versioning. Multiple rows per modifier allowed (only 1 active)."""
+    """HCPCS modifiers (2-character codes)."""
 
     __tablename__ = "hcpcs_modifiers"
 
     id                = Column(Integer,  primary_key=True, autoincrement=True)
-    hcpc              = Column(String(2),    nullable=False, index=True)  # 2-char modifier code, NOT unique — allows versions
-
-    seqnum            = Column(Integer,      nullable=True)
-    recid             = Column(Integer,      nullable=True)
-    long_description  = Column(Text,         nullable=True)
-
-    add_dt            = Column(Date,         nullable=True)
-    act_eff_dt        = Column(Date,         nullable=True)
+    code              = Column(String(2),    nullable=False, index=True)
+    description       = Column(Text,         nullable=True)
+    category          = Column(String(10),   nullable=True)
+    eff_date          = Column(Date,         nullable=True)
     term_dt           = Column(Date,         nullable=True)
 
     is_active         = Column(Boolean,      nullable=False, default=True, index=True)
@@ -103,7 +96,7 @@ class HcpcsModifier(Base):
 
     def __repr__(self) -> str:
         status = "active" if self.is_active else "inactive"
-        return f"<HcpcsModifier {self.hcpc} | {status} | {(self.long_description or '')[:40]}>"
+        return f"<HcpcsModifier {self.code} | {status} | {(self.description or '')[:40]}>"
 
 
 class HcpcsModifierSyncLog(Base):
@@ -133,19 +126,15 @@ class HcpcsModifierSyncLog(Base):
 
 
 class HcpcsCode(Base):
-    """HCPCS Level II procedure codes with versioning. Multiple rows per code allowed (only 1 active)."""
+    """HCPCS Level II procedure codes."""
 
     __tablename__ = "hcpcs_codes"
 
     id                = Column(Integer,  primary_key=True, autoincrement=True)
-    hcpc              = Column(String(10),   nullable=False, index=True)  # NOT unique — allows versions
-
-    seqnum            = Column(Integer,      nullable=True)
-    recid             = Column(Integer,      nullable=True)
-    long_description  = Column(Text,         nullable=True)
-
-    add_dt            = Column(Date,         nullable=True)
-    act_eff_dt        = Column(Date,         nullable=True)
+    code              = Column(String(10),   nullable=False, index=True)
+    description       = Column(Text,         nullable=True)
+    category          = Column(String(10),   nullable=True)
+    eff_date          = Column(Date,         nullable=True)
     term_dt           = Column(Date,         nullable=True)
 
     is_active         = Column(Boolean,      nullable=False, default=True, index=True)
@@ -156,7 +145,7 @@ class HcpcsCode(Base):
 
     def __repr__(self) -> str:
         status = "active" if self.is_active else "inactive"
-        return f"<HcpcsCode {self.hcpc} | {status} | {(self.long_description or '')[:40]}>"
+        return f"<HcpcsCode {self.code} | {status} | {(self.description or '')[:40]}>"
 
 
 class HcpcsSyncLog(Base):
@@ -190,30 +179,15 @@ class HcpcsSyncLog(Base):
 # ---------------------------------------------------------------------------
 
 class IcdPcsCode(Base):
-    """
-    ICD-10-PCS inpatient procedure codes with versioning.
-    Multiple rows per code allowed (only 1 active at a time).
-
-    A PCS code is exactly 7 alphanumeric characters (no dot notation):
-      Char 1 — Section        (e.g. 0 = Medical and Surgical)
-      Char 2 — Body System
-      Char 3 — Root Operation
-      Char 4 — Body Part
-      Char 5 — Approach
-      Char 6 — Device
-      Char 7 — Qualifier
-    """
+    """ICD-10-PCS inpatient procedure codes (7 alphanumeric characters)."""
 
     __tablename__ = "icd_pcs_codes"
 
     id             = Column(Integer,  primary_key=True, autoincrement=True)
-    code           = Column(String(7),   nullable=False, index=True)   # NOT unique — allows versions
+    code           = Column(String(7),   nullable=False, index=True)
     description    = Column(Text,        nullable=False)
-    section        = Column(String(1),   nullable=True,  index=True)   # first char of the code
-    section_name   = Column(String(100), nullable=True)                # human-readable section label
-    is_valid       = Column(Boolean,     nullable=False, default=True, index=True)  # 1 = valid/billable
-    version        = Column(String(10),  nullable=False)
-    effective_date = Column(Date,        nullable=True)
+    category       = Column(String(1),   nullable=True,  index=True)
+    eff_date       = Column(Date,        nullable=True)
 
     is_active      = Column(Boolean,     nullable=False, default=True, index=True)
     term_dt        = Column(Date,        nullable=True)

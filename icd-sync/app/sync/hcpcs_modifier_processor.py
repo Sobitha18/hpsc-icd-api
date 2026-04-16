@@ -26,7 +26,7 @@ async def sync_hcpcs_modifiers(
     source_url: str,
 ) -> HcpcsModifierSyncStats:
     """Sync HCPCS modifiers using generic processor."""
-    generic_stats = await sync_generic(db, records, HcpcsModifier, "hcpc")
+    generic_stats = await sync_generic(db, records, HcpcsModifier, "code")
     return HcpcsModifierSyncStats(
         added=generic_stats.added,
         updated=generic_stats.updated,
