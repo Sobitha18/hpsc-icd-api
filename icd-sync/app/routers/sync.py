@@ -5,6 +5,7 @@ Routes to appropriate handler based on code_type parameter.
 """
 
 import logging
+from datetime import date
 from typing import Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -22,19 +23,27 @@ from app.sync.hcpcs_processor import (
     sync_hcpcs_modifiers,
 )
 from app.sync.icd_processor import SyncStats, record_sync_history, sync_icd_codes
-from app.sync.icd_pcs_fetcher import CMS_ICD_PCS_URL, fetch_icd_pcs_codes
+from app.sync.icd_pcs_fetcher import _cms_icd_pcs_url, fetch_icd_pcs_codes
 from app.sync.icd_pcs_processor import record_pcs_sync_history, sync_icd_pcs_codes
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/sync", tags=["Sync"])
 
-_ICD_URL = "https://www.cms.gov/files/zip/2026-code-descriptions-tabular-order.zip"
+
+def _default_icd_url() -> str:
+    """
+    Generate the current year's ICD-10-CM order file URL.
+    CMS publishes new versions on October 1 each year.
+    """
+    year = date.today().year
+    return f"https://www.cms.gov/files/zip/{year}-code-descriptions-tabular-order.zip"
+
 
 # Handler registry for code type routing
 _sync_handlers = {
-    "icd":     lambda url, db: _sync_icd(url or _ICD_URL, db),
+    "icd":     lambda url, db: _sync_icd(url or _default_icd_url(), db),
     "hcpcs":   lambda url, db: _sync_hcpcs(url, db),
-    "icd_pcs": lambda url, db: _sync_icd_pcs(url or CMS_ICD_PCS_URL, db),
+    "icd_pcs": lambda url, db: _sync_icd_pcs(url or _cms_icd_pcs_url(), db),
 }
 
 

@@ -42,13 +42,21 @@ from typing import Dict, List, Optional, Tuple
 import httpx
 
 # ---------------------------------------------------------------------------
-# CMS default URL — FY2026 ICD-10-PCS order file (long + abbreviated titles)
-# Updated annually; override via the ?url= query parameter on the sync endpoint.
+# CMS default URL — dynamically generated based on current year
+# ICD-10-PCS order file (long + abbreviated titles)
+# Override via the ?url= query parameter on the sync endpoint.
 # ---------------------------------------------------------------------------
-CMS_ICD_PCS_URL = (
-    "https://www.cms.gov/files/zip/"
-    "2026-icd-10-pcs-order-file-long-and-abbreviated-titles.zip"
-)
+def _cms_icd_pcs_url() -> str:
+    """
+    Generate the current year's ICD-10-PCS order file URL.
+    CMS publishes new versions on October 1 each year.
+    """
+    year = date.today().year
+    return f"https://www.cms.gov/files/zip/{year}-icd-10-pcs-order-file-long-and-abbreviated-titles.zip"
+
+
+# For backward compatibility, expose as constant (calls function)
+CMS_ICD_PCS_URL = _cms_icd_pcs_url()
 
 # ---------------------------------------------------------------------------
 # PCS Section map — first character of the code → human-readable section name
