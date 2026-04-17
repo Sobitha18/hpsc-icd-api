@@ -62,14 +62,6 @@ CHAPTER_MAP = [
 ]
 
 
-def get_chapter(code: str) -> Optional[str]:
-    """Return the chapter name for a given ICD code, or None if unknown."""
-    for pattern, chapter_name in CHAPTER_MAP:
-        if pattern.match(code):
-            return chapter_name
-    return None
-
-
 def parse_version_from_filename(filename: str) -> str:
     """
     Extract the fiscal year from the CMS filename.

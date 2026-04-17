@@ -80,18 +80,6 @@ def _clean_str(val) -> Optional[str]:
     return s if s else None
 
 
-def _clean_num(val) -> Optional[float]:
-    if val is None:
-        return None
-    try:
-        import math
-        if isinstance(val, float) and math.isnan(val):
-            return None
-        return float(val)
-    except Exception:
-        return None
-
-
 def _row_to_dict(row: "pd.Series") -> dict:
     """Map one ANWEB Excel row to our simplified DB column names."""
     return {
@@ -221,9 +209,6 @@ def _parse_zip_to_records(zip_bytes: bytes) -> Tuple[List[dict], List[dict], str
     )
 
 
-# ---------------------------------------------------------------------------
-# Public async entry point
-# ---------------------------------------------------------------------------
 
 async def fetch_hcpcs_codes(
     url: Optional[str] = None,

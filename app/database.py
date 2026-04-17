@@ -10,8 +10,8 @@ Concepts used here:
   - get_db()      : FastAPI dependency — gives each endpoint its own session
 """
 
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.orm import DeclarativeBase
 from pydantic_settings import BaseSettings
 
 
@@ -47,7 +47,7 @@ engine = create_async_engine(
 # this factory, runs the endpoint, then closes it automatically.
 # expire_on_commit=False means we can still read object fields after commit.
 # ---------------------------------------------------------------------------
-AsyncSessionLocal = sessionmaker(
+AsyncSessionLocal = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,
     expire_on_commit=False,

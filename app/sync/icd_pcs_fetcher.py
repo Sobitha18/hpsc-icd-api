@@ -74,11 +74,6 @@ PCS_SECTION_MAP: Dict[str, str] = {
 }
 
 
-def get_section_name(code: str) -> Optional[str]:
-    """Return the section name for the first character of a PCS code."""
-    return PCS_SECTION_MAP.get(code[0].upper()) if code else None
-
-
 def parse_version_from_filename(filename: str) -> str:
     """
     Extract the fiscal year from the CMS filename.
@@ -119,7 +114,7 @@ def parse_order_file(content: bytes, version: str) -> List[dict]:
             continue
 
         # Fixed-width column extraction (same offsets as ICD-10-CM order file)
-        code        = raw_line[6:13].strip()   # chars 7-13 (0-indexed: 6-13)
+        code = raw_line[6:13].strip()   # chars 7-13 (0-indexed: 6-13)
         description = raw_line[16:77].strip()  # chars 17-77 (0-indexed: 16-77)
 
         if not code or not description:

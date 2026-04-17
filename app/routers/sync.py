@@ -27,8 +27,8 @@ _ICD_URL = "https://www.cms.gov/files/zip/2026-code-descriptions-tabular-order.z
 
 # Handler registry for code type routing
 _sync_handlers = {
-    "icd":     lambda url, db: _sync_icd(url or _ICD_URL, db),
-    "hcpcs":   lambda url, db: _sync_hcpcs(url, db),
+    "icd": lambda url, db: _sync_icd(url or _ICD_URL, db),
+    "hcpcs": lambda url, db: _sync_hcpcs(url, db),
     "icd_pcs": lambda url, db: _sync_icd_pcs(url or CMS_ICD_PCS_URL, db),
 }
 
