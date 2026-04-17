@@ -14,8 +14,13 @@ from app.database import get_db
 from app.schemas import HcpcsSyncResult, IcdPcsSyncResult, SyncResult
 from app.sync.icd_fetcher import fetch_icd_codes
 from app.sync.hcpcs_fetcher import CMS_HCPCS_QUARTERLY_URL, fetch_hcpcs_codes
-from app.sync.hcpcs_processor import HcpcsSyncStats, record_hcpcs_sync_log, sync_hcpcs_codes
-from app.sync.hcpcs_modifier_processor import HcpcsModifierSyncStats, record_hcpcs_modifier_sync_log, sync_hcpcs_modifiers
+from app.sync.hcpcs_processor import (
+    HcpcsSyncStats,
+    record_hcpcs_sync_log,
+    record_hcpcs_modifier_sync_log,
+    sync_hcpcs_codes,
+    sync_hcpcs_modifiers,
+)
 from app.sync.icd_processor import SyncStats, record_sync_history, sync_icd_codes
 from app.sync.icd_pcs_fetcher import CMS_ICD_PCS_URL, fetch_icd_pcs_codes
 from app.sync.icd_pcs_processor import record_pcs_sync_history, sync_icd_pcs_codes
@@ -92,7 +97,7 @@ async def _sync_icd(url: str, db: AsyncSession) -> SyncResult:
 
 async def _sync_hcpcs(url: Optional[str], db: AsyncSession) -> HcpcsSyncResult:
     """Sync HCPCS modifiers and codes."""
-    mod_stats = HcpcsModifierSyncStats()
+    mod_stats = HcpcsSyncStats()
     code_stats = HcpcsSyncStats()
     status, err_msg = "failed", None
     cycle, zip_filename = "unknown", "unknown"

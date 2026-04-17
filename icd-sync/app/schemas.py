@@ -7,19 +7,16 @@ ICD-10-CM:
   IcdCodeBase       — light list view
   IcdCodeDetail     — full single-code view
   SyncResult        — POST /sync/icd response
-  SyncHistoryItem   — GET /sync/history row
 
 HCPCS:
   HcpcsCodeBase     — light list view
   HcpcsCodeDetail   — full single-code view
   HcpcsSyncResult   — POST /sync/hcpcs response
-  HcpcsSyncLogItem  — GET /sync/hcpcs/history row
 
 ICD-10-PCS:
   IcdPcsCodeBase       — light list view
   IcdPcsCodeDetail     — full single-code view
   IcdPcsSyncResult     — POST /sync/icd_pcs response
-  IcdPcsSyncHistoryItem — GET /sync/icd_pcs/history row
 
 Shared:
   PaginatedIcdCodes / PaginatedHcpcsCodes / PaginatedIcdPcsCodes — paginated list wrappers
@@ -70,26 +67,6 @@ class SyncResult(BaseModel):
     message:       str           = Field(example="Sync completed successfully")
 
 
-class SyncHistoryItem(BaseModel):
-    id:            int
-    synced_at:     datetime
-    source_url:    str
-    version:       Optional[str]
-    codes_added:   int
-    codes_updated: int
-    codes_deleted: int
-    codes_skipped: int
-    status:        str
-    error_message: Optional[str] = None
-
-    class Config:
-        from_attributes = True
-
-
-# ---------------------------------------------------------------------------
-# HCPCS schemas
-# ---------------------------------------------------------------------------
-
 class HcpcsCodeBase(BaseModel):
     """Light view returned in paginated list responses."""
     code:        str            = Field(example="J1100")
@@ -111,39 +88,11 @@ class HcpcsCodeDetail(HcpcsCodeBase):
         from_attributes = True
 
 
-class HcpcsModifierBase(BaseModel):
-    """Light view for HCPCS modifiers."""
-    code:        str            = Field(example="A1")
-    description: Optional[str]  = Field(None, example="Dressing for one wound")
-    category:    Optional[str]  = Field(None, example=None)
-    eff_date:    Optional[date] = Field(None, example=None)
-    term_dt:     Optional[date] = Field(None, example=None)
-
-    class Config:
-        from_attributes = True
-
-
-class HcpcsModifierDetail(HcpcsModifierBase):
-    """Full view for HCPCS modifiers."""
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
-
-
 class PaginatedHcpcsCodes(BaseModel):
     total:   int               = Field(example=7000)
     page:    int               = Field(example=1)
     size:    int               = Field(example=50)
     results: List[HcpcsCodeBase]
-
-
-class PaginatedHcpcsModifiers(BaseModel):
-    total:   int                 = Field(example=383)
-    page:    int                 = Field(example=1)
-    size:    int                 = Field(example=50)
-    results: List[HcpcsModifierBase]
 
 
 class HcpcsSyncResult(BaseModel):
@@ -159,24 +108,6 @@ class HcpcsSyncResult(BaseModel):
     codes_deleted:       int           = Field(example=10)
     codes_skipped:       int           = Field(example=6800)
     message:             str           = Field(example="HCPCS sync completed successfully")
-
-
-class HcpcsSyncLogItem(BaseModel):
-    id:            int
-    synced_at:     datetime
-    source_url:    Optional[str]
-    zip_filename:  Optional[str]
-    update_cycle:  Optional[str]
-    total_codes:   Optional[int]
-    inserted:      int
-    updated:       int
-    deleted:       int
-    skipped:       int
-    status:        str
-    error_message: Optional[str] = None
-
-    class Config:
-        from_attributes = True
 
 
 # ---------------------------------------------------------------------------
@@ -218,17 +149,3 @@ class IcdPcsSyncResult(BaseModel):
     message:       str           = Field(example="ICD-10-PCS sync completed successfully")
 
 
-class IcdPcsSyncHistoryItem(BaseModel):
-    id:            int
-    synced_at:     datetime
-    source_url:    str
-    version:       Optional[str]
-    codes_added:   int
-    codes_updated: int
-    codes_deleted: int
-    codes_skipped: int
-    status:        str
-    error_message: Optional[str] = None
-
-    class Config:
-        from_attributes = True

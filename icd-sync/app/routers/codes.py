@@ -145,8 +145,8 @@ async def list_hcpcs_codes(
     betos:     Optional[str] = Query(None, description="Filter by BETOS code (exact match)"),
     cov:       Optional[str] = Query(None, description="Filter by coverage indicator (exact match)"),
     action_cd: Optional[str] = Query(None, description="Filter by action code (exact match)"),
-    page:      int           = Query(1,  ge=1,        description="Page number (1-based)"),
-    size:      int           = Query(50, ge=1, le=200, description="Results per page"),
+    page:      int = Query(1,  ge=1,        description="Page number (1-based)"),
+    size:      int  = Query(50, ge=1, le=200, description="Results per page"),
     db: AsyncSession = Depends(get_db),
 ):
     """

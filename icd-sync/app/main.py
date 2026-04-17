@@ -22,9 +22,9 @@ from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI
 from sqlalchemy import text
 
-from app.database import AsyncSessionLocal, Base, engine
-from app.models import HcpcsCode, HcpcsSyncLog, IcdCode, IcdPcsCode, IcdPcsSyncHistory, SyncHistory  # noqa: F401 — ensures all tables are registered with Base before create_all
-from app.routers import codes, sync
+from .database import AsyncSessionLocal, Base, engine
+from .models import HcpcsCode, HcpcsModifier, HcpcsModifierSyncLog, HcpcsSyncLog, IcdCode, IcdPcsCode, IcdPcsSyncHistory, SyncHistory  # noqa: F401 — ensures all tables are registered with Base before create_all
+from .routers import sync
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -33,10 +33,10 @@ logger = logging.getLogger(__name__)
 # FastAPI app
 # ---------------------------------------------------------------------------
 app = FastAPI(
-    title="CMS Medical Codes API",
+    title="CMS Medical Codes Sync API",
     description=(
-        "Syncs ICD-10-CM diagnosis codes and HCPCS procedure codes from CMS "
-        "to PostgreSQL, and exposes a unified query API for both code sets."
+        "Syncs ICD-10-CM diagnosis codes, HCPCS procedure codes, and ICD-10-PCS "
+        "inpatient procedure codes from CMS to PostgreSQL."
     ),
     version="2.0.0",
     docs_url=None,
@@ -45,7 +45,6 @@ app = FastAPI(
 )
 
 # Register routers
-app.include_router(codes.router)
 app.include_router(sync.router)
 
 # ---------------------------------------------------------------------------
@@ -57,7 +56,7 @@ scheduler = AsyncIOScheduler()
 async def scheduled_icd_sync():
     """Called automatically by the scheduler on October 1 each year."""
     logger.info("Scheduled ICD sync starting...")
-    from app.routers.sync import _sync_icd, _ICD_URL
+    from .routers.sync import _sync_icd, _ICD_URL
 
     async with AsyncSessionLocal() as db:
         result = await _sync_icd(_ICD_URL, db)
