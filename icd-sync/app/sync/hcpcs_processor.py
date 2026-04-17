@@ -15,26 +15,15 @@ from app.sync.generic_processor import sync_generic, SyncStats
 log = logging.getLogger(__name__)
 
 
-class HcpcsSyncStats(SyncStats):
-    """HCPCS sync stats (same as generic, for backward compatibility)."""
-    pass
-
-
 async def sync_hcpcs_data(
     db: AsyncSession,
     records: list,
     model: Type[DeclarativeBase],
     cycle: str,
     source_url: str,
-) -> HcpcsSyncStats:
+) -> SyncStats:
     """Sync HCPCS data (codes or modifiers) using generic processor."""
-    generic_stats = await sync_generic(db, records, model, "code")
-    return HcpcsSyncStats(
-        added=generic_stats.added,
-        updated=generic_stats.updated,
-        deleted=generic_stats.deleted,
-        skipped=generic_stats.skipped,
-    )
+    return await sync_generic(db, records, model, "code")
 
 
 async def _record_hcpcs_sync_log_unified(
@@ -43,7 +32,7 @@ async def _record_hcpcs_sync_log_unified(
     zip_filename: str,
     update_cycle: str,
     total_codes: int,
-    stats: HcpcsSyncStats,
+    stats: SyncStats,
     status: str,
     log_model: Type[DeclarativeBase],
     error_message: Optional[str] = None,
@@ -71,7 +60,7 @@ async def sync_hcpcs_codes(
     records: list,
     cycle: str,
     source_url: str,
-) -> HcpcsSyncStats:
+) -> SyncStats:
     """Sync HCPCS codes (backward compatibility wrapper)."""
     return await sync_hcpcs_data(db, records, HcpcsCode, cycle, source_url)
 
@@ -81,7 +70,7 @@ async def sync_hcpcs_modifiers(
     records: list,
     cycle: str,
     source_url: str,
-) -> HcpcsSyncStats:
+) -> SyncStats:
     """Sync HCPCS modifiers (backward compatibility wrapper)."""
     return await sync_hcpcs_data(db, records, HcpcsModifier, cycle, source_url)
 
@@ -92,7 +81,7 @@ async def record_hcpcs_sync_log(
     zip_filename: str,
     update_cycle: str,
     total_codes: int,
-    stats: HcpcsSyncStats,
+    stats: SyncStats,
     status: str,
     error_message: Optional[str] = None,
 ) -> None:
@@ -109,7 +98,7 @@ async def record_hcpcs_modifier_sync_log(
     zip_filename: str,
     update_cycle: str,
     total_codes: int,
-    stats: HcpcsSyncStats,
+    stats: SyncStats,
     status: str,
     error_message: Optional[str] = None,
 ) -> None:

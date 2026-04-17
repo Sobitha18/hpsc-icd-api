@@ -16,7 +16,6 @@ from app.schemas import HcpcsSyncResult, IcdPcsSyncResult, SyncResult
 from app.sync.icd_fetcher import fetch_icd_codes
 from app.sync.hcpcs_fetcher import CMS_HCPCS_QUARTERLY_URL, fetch_hcpcs_codes
 from app.sync.hcpcs_processor import (
-    HcpcsSyncStats,
     record_hcpcs_sync_log,
     record_hcpcs_modifier_sync_log,
     sync_hcpcs_codes,
@@ -106,8 +105,8 @@ async def _sync_icd(url: str, db: AsyncSession) -> SyncResult:
 
 async def _sync_hcpcs(url: Optional[str], db: AsyncSession) -> HcpcsSyncResult:
     """Sync HCPCS modifiers and codes."""
-    mod_stats = HcpcsSyncStats()
-    code_stats = HcpcsSyncStats()
+    mod_stats = SyncStats()
+    code_stats = SyncStats()
     status, err_msg = "failed", None
     cycle, zip_filename = "unknown", "unknown"
 
