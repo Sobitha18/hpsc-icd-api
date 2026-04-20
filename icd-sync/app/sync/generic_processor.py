@@ -1,9 +1,5 @@
-"""
-generic_processor.py
-Generic sync logic for any code type (ICD or HCPCS).
-Handles: versioning, hash comparison, soft deletes, atomic commits.
-"""
-
+import hashlib
+import json
 import logging
 from dataclasses import dataclass
 from datetime import date
@@ -12,92 +8,59 @@ from typing import Any, Dict, List, Type
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.sync.utils import hash_row
-
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 
 @dataclass
 class SyncStats:
-    """Generic sync statistics."""
-    added: int = 0
+    added:   int = 0
     updated: int = 0
     deleted: int = 0
     skipped: int = 0
 
 
-async def sync_generic(
-    db: AsyncSession,
-    records: List[dict],
-    code_model: Type,
-    code_field: str,
-) -> SyncStats:
-    """
-    Generic sync logic for any code type.
+def hash_row(data: dict) -> str:
+    skip_fields = {"data_hash", "created_at", "updated_at", "id"}
+    clean = {}
+    for k, v in data.items():
+        if k in skip_fields:
+            continue
+        clean[k] = v.isoformat() if isinstance(v, date) else (None if v is None else str(v))
+    return hashlib.md5(json.dumps(clean, sort_keys=True).encode()).hexdigest()
 
-    Args:
-      db: Database session
-      records: List of code dicts from fetcher
-      code_model: SQLAlchemy model (IcdCode or HcpcsCode)
-      code_field: Field name for code ID ("code" or "hcpc")
 
-    Returns:
-      SyncStats with counts of changes
-    """
+async def sync_generic(db: AsyncSession, records: List[dict], model: Type, code_field: str, term_date: date = None) -> SyncStats:
     stats = SyncStats()
 
-    # Load existing ACTIVE codes
-    result = await db.execute(select(code_model).where(code_model.is_active == True))
-    existing_rows: Dict[str, Any] = {
-        getattr(row, code_field): row for row in result.scalars().all()
+    existing: Dict[str, Any] = {
+        getattr(row, code_field): row
+        for row in (await db.execute(select(model).where(model.is_active == True))).scalars().all()
     }
-    logger.info("Loaded %d existing ACTIVE codes from DB", len(existing_rows))
+    incoming: Dict[str, dict] = {r[code_field]: r for r in records}
 
-    # Build lookup from new records
-    new_records: Dict[str, dict] = {r[code_field]: r for r in records}
-    logger.info("Parsed %d codes from CMS file", len(new_records))
-
-    # Process: INSERT new / UPDATE changed / SKIP unchanged
-    to_insert: List[Any] = []
-
-    for code_val, rec in new_records.items():
+    to_insert = []
+    for code_val, rec in incoming.items():
         new_hash = hash_row(rec)
-
-        if code_val not in existing_rows:
-            # New code
-            to_insert.append(code_model(**rec, data_hash=new_hash, is_active=True))
+        if code_val not in existing:
+            to_insert.append(model(**rec, data_hash=new_hash, is_active=True))
             stats.added += 1
+        elif existing[code_val].data_hash != new_hash:
+            existing[code_val].is_active = False
+            to_insert.append(model(**rec, data_hash=new_hash, is_active=True))
+            stats.updated += 1
         else:
-            existing = existing_rows[code_val]
-            if existing.data_hash is not None and existing.data_hash == new_hash:
-                # No change
-                stats.skipped += 1
-            else:
-                # Changed — mark old inactive, insert new version
-                existing.is_active = False
-                to_insert.append(code_model(**rec, data_hash=new_hash, is_active=True))
-                stats.updated += 1
+            stats.skipped += 1
 
     if to_insert:
         db.add_all(to_insert)
-        logger.info("Inserting %d new code versions", len(to_insert))
 
-    # Soft-delete retired codes
-    retired = [code_val for code_val in existing_rows if code_val not in new_records]
+    deletion_date = term_date or date.today()
+    for code_val in existing:
+        if code_val not in incoming:
+            existing[code_val].is_active = False
+            existing[code_val].term_dt = deletion_date
+            stats.deleted += 1
 
-    if retired:
-        today = date.today()
-        for code_val in retired:
-            existing_rows[code_val].is_active = False
-            existing_rows[code_val].term_dt = today
-        stats.deleted = len(retired)
-        logger.info("Soft-deleted %d retired codes", stats.deleted)
-
-    # Atomic commit
     await db.commit()
-    logger.info(
-        "Sync complete — added: %d, updated: %d, deleted: %d, skipped: %d",
-        stats.added, stats.updated, stats.deleted, stats.skipped,
-    )
-
+    log.info("%s — added:%d updated:%d deleted:%d skipped:%d", model.__name__, stats.added, stats.updated, stats.deleted, stats.skipped)
     return stats
