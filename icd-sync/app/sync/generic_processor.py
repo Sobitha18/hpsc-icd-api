@@ -1,3 +1,5 @@
+import hashlib
+import json
 import logging
 from dataclasses import dataclass
 from datetime import date
@@ -5,8 +7,6 @@ from typing import Any, Dict, List, Type
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.sync.utils import hash_row
 
 log = logging.getLogger(__name__)
 
@@ -17,6 +17,16 @@ class SyncStats:
     updated: int = 0
     deleted: int = 0
     skipped: int = 0
+
+
+def hash_row(data: dict) -> str:
+    skip_fields = {"data_hash", "created_at", "updated_at", "id"}
+    clean = {}
+    for k, v in data.items():
+        if k in skip_fields:
+            continue
+        clean[k] = v.isoformat() if isinstance(v, date) else (None if v is None else str(v))
+    return hashlib.md5(json.dumps(clean, sort_keys=True).encode()).hexdigest()
 
 
 async def sync_generic(db: AsyncSession, records: List[dict], model: Type, code_field: str, term_date: date = None) -> SyncStats:

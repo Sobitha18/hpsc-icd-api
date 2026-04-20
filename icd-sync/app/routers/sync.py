@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import IcdCode, IcdPcsCode, IcdPcsSyncHistory, SyncHistory
 from app.schemas import HcpcsSyncResult, SyncResult
-from app.sync.base import OrderFileSyncer
+from app.sync.icd_and_icd_pcs import OrderFileSyncer
 from app.sync.hcpcs import HcpcsSyncer
 
 router = APIRouter(prefix="/sync", tags=["Sync"])
