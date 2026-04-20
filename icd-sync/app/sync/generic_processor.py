@@ -19,7 +19,7 @@ class SyncStats:
     skipped: int = 0
 
 
-async def sync_generic(db: AsyncSession, records: List[dict], model: Type, code_field: str) -> SyncStats:
+async def sync_generic(db: AsyncSession, records: List[dict], model: Type, code_field: str, term_date: date = None) -> SyncStats:
     stats = SyncStats()
 
     existing: Dict[str, Any] = {
@@ -44,11 +44,11 @@ async def sync_generic(db: AsyncSession, records: List[dict], model: Type, code_
     if to_insert:
         db.add_all(to_insert)
 
-    today = date.today()
+    deletion_date = term_date or date.today()
     for code_val in existing:
         if code_val not in incoming:
             existing[code_val].is_active = False
-            existing[code_val].term_dt = today
+            existing[code_val].term_dt = deletion_date
             stats.deleted += 1
 
     await db.commit()

@@ -17,14 +17,14 @@ _SYNCERS = {
         url_template="https://www.cms.gov/files/zip/{year}-code-descriptions-tabular-order.zip",
         model=IcdCode,
         history_model=SyncHistory,
-        category_fn=lambda c: c[:3],
+        category_fn=lambda _: "ICD",
     ),
     "icd_pcs": lambda db: OrderFileSyncer(
         db,
         url_template="https://www.cms.gov/files/zip/{year}-icd-10-pcs-order-file-long-and-abbreviated-titles.zip",
         model=IcdPcsCode,
         history_model=IcdPcsSyncHistory,
-        category_fn=lambda c: c[0].upper() if c else None,
+        category_fn=lambda _: "ICD_PCS",
     ),
     "hcpcs": HcpcsSyncer,
 }

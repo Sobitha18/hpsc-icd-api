@@ -3,7 +3,6 @@ from app.database import Base
 
 
 class CodeMixin:
-    id         = Column(Integer,  primary_key=True, autoincrement=True)
     is_active  = Column(Boolean,  nullable=False, default=True, index=True)
     term_dt    = Column(Date,     nullable=True)
     data_hash  = Column(String(32), nullable=True)
@@ -41,7 +40,7 @@ class HcpcsSyncMixin:
 
 class IcdCode(CodeMixin, Base):
     __tablename__ = "icd_codes"
-    code        = Column(String(10), nullable=False, index=True)
+    code        = Column(String(10), primary_key=True, nullable=False)
     description = Column(Text,       nullable=False)
     category    = Column(String(3),  nullable=False, index=True)
     eff_date    = Column(Date,       nullable=True)
@@ -49,7 +48,7 @@ class IcdCode(CodeMixin, Base):
 
 class HcpcsModifier(CodeMixin, Base):
     __tablename__ = "hcpcs_modifiers"
-    code        = Column(String(2),  nullable=False, index=True)
+    code        = Column(String(2),  primary_key=True, nullable=False)
     description = Column(Text,       nullable=True)
     category    = Column(String(10), nullable=True)
     eff_date    = Column(Date,       nullable=True)
@@ -57,7 +56,7 @@ class HcpcsModifier(CodeMixin, Base):
 
 class HcpcsCode(CodeMixin, Base):
     __tablename__ = "hcpcs_codes"
-    code        = Column(String(10), nullable=False, index=True)
+    code        = Column(String(10), primary_key=True, nullable=False)
     description = Column(Text,       nullable=True)
     category    = Column(String(10), nullable=True)
     eff_date    = Column(Date,       nullable=True)
@@ -65,9 +64,9 @@ class HcpcsCode(CodeMixin, Base):
 
 class IcdPcsCode(CodeMixin, Base):
     __tablename__ = "icd_pcs_codes"
-    code        = Column(String(7),  nullable=False, index=True)
+    code        = Column(String(7),  primary_key=True, nullable=False)
     description = Column(Text,       nullable=False)
-    category    = Column(String(1),  nullable=True,  index=True)
+    category    = Column(String(10), nullable=True,  index=True)
     eff_date    = Column(Date,       nullable=True)
 
 

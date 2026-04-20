@@ -27,8 +27,8 @@ class OrderFileSyncer:
         stats, status, err, version = SyncStats(), "failed", None, "unknown"
         try:
             content, version = await self._download(actual_url)
-            records = self._parse(content, version)
-            stats = await sync_generic(self.db, records, self._model, "code")
+            records, eff_date = self._parse(content, version)
+            stats = await sync_generic(self.db, records, self._model, "code", eff_date)
             status = "success"
         except Exception as exc:
             err = str(exc)
@@ -56,7 +56,7 @@ class OrderFileSyncer:
             m = re.search(r"(\d{4})", fname)
             return zf.read(fname), m.group(1) if m else "unknown"
 
-    def _parse(self, content: bytes, version: str) -> List[dict]:
+    def _parse(self, content: bytes, version: str) -> Tuple[List[dict], date]:
         eff_date = date(int(version) - 1, 10, 1) if version.isdigit() else None
         records = []
         for line in content.decode("utf-8", errors="replace").splitlines():
@@ -66,7 +66,7 @@ class OrderFileSyncer:
             desc = line[16:77].strip()
             if code and desc:
                 records.append({"code": code, "description": desc, "category": self._category_fn(code), "eff_date": eff_date})
-        return records
+        return records, eff_date
 
     async def _audit(self, url: str, version: str, stats: SyncStats, status: str, error: Optional[str]) -> None:
         self.db.add(self._history_model(

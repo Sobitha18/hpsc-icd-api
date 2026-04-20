@@ -39,12 +39,12 @@ class HcpcsSyncer:
         status, err, cycle, zip_filename = "failed", None, "unknown", "unknown"
 
         try:
-            modifiers, codes, cycle, zip_filename = await self._fetch(url)
+            modifiers, codes, cycle, zip_filename, term_date = await self._fetch(url)
             if modifiers:
-                mod_stats = await sync_generic(self.db, modifiers, HcpcsModifier, "code")
+                mod_stats = await sync_generic(self.db, modifiers, HcpcsModifier, "code", term_date)
                 await self._audit(HcpcsModifierSyncLog, url, zip_filename, cycle, len(modifiers), mod_stats, "success", None)
             if codes:
-                code_stats = await sync_generic(self.db, codes, HcpcsCode, "code")
+                code_stats = await sync_generic(self.db, codes, HcpcsCode, "code", term_date)
                 await self._audit(HcpcsSyncLog, url, zip_filename, cycle, len(codes), code_stats, "success", None)
             status = "success"
         except Exception as exc:
@@ -63,12 +63,13 @@ class HcpcsSyncer:
             message=msg,
         )
 
-    async def _fetch(self, url: Optional[str]) -> Tuple[List[dict], List[dict], str, str]:
+    async def _fetch(self, url: Optional[str]) -> Tuple[List[dict], List[dict], str, str, Optional[date]]:
         async with httpx.AsyncClient(timeout=120.0, headers=_HEADERS, follow_redirects=True) as client:
+            updated_date = None
             if url is None:
                 resp = await client.get(_CMS_QUARTERLY_URL)
                 resp.raise_for_status()
-                zip_url, zip_filename = self._scrape_latest_zip_url(resp.text)
+                zip_url, zip_filename, updated_date = self._scrape_latest_zip_url(resp.text)
             else:
                 zip_url, zip_filename = url, url.split("/")[-1].split("?")[0]
             resp = await client.get(zip_url)
@@ -78,7 +79,7 @@ class HcpcsSyncer:
         modifiers, codes, _ = await asyncio.get_event_loop().run_in_executor(
             None, partial(self._parse_zip_to_records, zip_bytes)
         )
-        return modifiers, codes, self._derive_cycle(zip_filename), zip_filename
+        return modifiers, codes, self._derive_cycle(zip_filename), zip_filename, updated_date
 
     async def _audit(self, log_model, source_url, zip_filename, cycle, total, stats, status, error) -> None:
         self.db.add(log_model(
@@ -91,7 +92,7 @@ class HcpcsSyncer:
         await self.db.commit()
 
     @staticmethod
-    def _scrape_latest_zip_url(html: str) -> Tuple[str, str]:
+    def _scrape_latest_zip_url(html: str) -> Tuple[str, str, Optional[date]]:
         soup = BeautifulSoup(html, "lxml")
         candidates = []
         for link in soup.find_all("a", href=True):
@@ -104,7 +105,7 @@ class HcpcsSyncer:
             m = re.search(r"updated\s+(\d{1,2}/\d{1,2}/\d{4})", link.parent.get_text(" ", strip=True) if link.parent else "", re.IGNORECASE)
             if m:
                 try:
-                    updated_date = datetime.strptime(m.group(1), "%m/%d/%Y")
+                    updated_date = datetime.strptime(m.group(1), "%m/%d/%Y").date()
                 except ValueError:
                     pass
             full_url = href if href.startswith("http") else f"https://www.cms.gov{href}"
@@ -113,9 +114,9 @@ class HcpcsSyncer:
         if not candidates:
             raise RuntimeError(f"No Alpha-Numeric HCPCS ZIP found on CMS page. Check: {_CMS_QUARTERLY_URL}")
 
-        candidates.sort(key=lambda x: x[0] or datetime.min, reverse=True)
-        _, zip_url, zip_filename = candidates[0]
-        return zip_url, zip_filename
+        candidates.sort(key=lambda x: x[0] or date.min, reverse=True)
+        updated_date, zip_url, zip_filename = candidates[0]
+        return zip_url, zip_filename, updated_date
 
     @staticmethod
     def _parse_zip_to_records(zip_bytes: bytes) -> Tuple[List[dict], List[dict], str]:
@@ -144,7 +145,7 @@ class HcpcsSyncer:
         return {
             "code":        HcpcsSyncer._clean(row.get("HCPC")),
             "description": HcpcsSyncer._clean(row.get("LONG DESCRIPTION")),
-            "category":    None,
+            "category":    "HCPCS",
             "eff_date":    HcpcsSyncer._parse_date(row.get("ACT EFF DT")),
             "term_dt":     HcpcsSyncer._parse_date(row.get("TERM DT")),
         }
